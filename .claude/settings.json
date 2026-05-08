@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh:*)",
+      "Bash(date:*)",
+      "Bash(jq:*)",
+      "Bash(npx:*)",
+      "Skill(workday-timelogger)",
+      "Skill(weekly-activity)"
+    ]
+  }
+}

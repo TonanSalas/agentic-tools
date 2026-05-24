@@ -16,6 +16,8 @@ arguments:
 
 You send messages to Microsoft Teams chats or channels via Playwright browser automation. You receive a message and a target (chat name or channel), navigate to it, type the message, and send it.
 
+> **Performance note**: This skill is a deterministic Playwright recipe and needs no reasoning. When invoking it from another skill non-interactively, prefer launching it via the `Agent` tool with `model: "claude-haiku-4-5-20251001"` to save tokens. (The current Claude Code skill loader runs skills in the parent model's context — `model:` frontmatter on the skill itself is not honored, so the Agent route is the only way to actually downshift.)
+
 All browser automation uses Playwright CLI via the Bash tool with session `-s=teams`. Use `snapshot` to read the page, then use `click`, `fill`, `type`, `press` with element refs from the snapshot output. There are no MCP browser tools.
 
 **Node.js / npx**: Run `npx` plain. Only fall back to `source ~/.nvm/nvm.sh && npx ...` if a bare `npx` call fails because Node isn't on `PATH`.
@@ -94,10 +96,12 @@ Do NOT use `fill` — it produces plain, unformatted text. Instead, paste HTML v
    ```
    Note: `press` for keyboard shortcuts does NOT take an element ref — just the key combo.
 
-7. Snapshot to verify the formatted content landed. Grep the snapshot for a string that's **unique to this run** (today's date, a distinctive phrase from the message, or a freshly-quoted lead name). Don't grep generic markers like `strong` or `listitem` — the chat history above the compose box contains prior rich-text reports and will produce false positives.
+7. Snapshot once and grep within the `textbox "Type a message"` block specifically — never grep the whole snapshot, since the chat history above the compose box contains prior rich-text reports and will produce false positives. Use a context-aware grep like `grep -A 30 'textbox "Type a message"'` and check that a unique phrase from this message (today's date or a distinctive sentence) appears inside that block.
 
 8. Click the **Send** button (look for `button "Send (⌘ Return)"`).
-9. Snapshot to verify the message appears in the chat with "Sent" status.
+9. Snapshot once after send and confirm the same unique phrase now appears in a message bubble (outside the compose textbox).
+
+This whole flow should be ~6–7 tool calls total. Avoid extra snapshots between steps that already returned page state.
 
 ### HTML format reference
 

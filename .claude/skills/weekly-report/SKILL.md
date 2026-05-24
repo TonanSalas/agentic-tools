@@ -48,38 +48,34 @@ The hierarchy has up to 4 levels:
 
 The section headers (*What I did this week* and *Goals for next week*) are in italics and stand alone above the list.
 
-## Phase 1: Gather Activity
+## Phase 1: Gather Activity (with ticket state)
 
-Call the `/weekly-activity` skill to get this week's GitHub data.
-
-If the user provided a `week` argument with a date range, pass it through:
-```
-skill: "weekly-activity", args: "<date-range>"
-```
-
-If no date range is given (or `week` is "this"), call without args (defaults to current week Monday–today):
-```
-skill: "weekly-activity"
-```
-
-Parse the output — it's a markdown table with columns: Day, Tickets & PRs, Source. Each ticket is formatted as `repo#num: title` (multi-repo) or `#num: title` (single-repo).
-
-## Phase 2: Check Ticket Status
-
-This is critical for placing items in the right section. After gathering activity, check the status of every unique ticket using `gh`:
+Call `gather_activity.py` directly with `--json` so each ticket comes back with its state already attached — no per-ticket `gh` calls needed downstream. This also hits the shared cache, so a same-week chain from `workday-timelogger` won't re-fetch.
 
 ```bash
-gh issue view <number> --repo dragonflyic/<repo> --json state,stateReason,title
-gh pr view <number> --repo dragonflyic/<repo> --json state,merged,title
+python3 .claude/skills/weekly-activity/scripts/gather_activity.py \
+  --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --json
 ```
 
-Classify each ticket into one of two buckets:
-- **Done**: PRs that are merged, issues that are closed
-- **In progress**: Open PRs, open issues, or any ticket not yet completed
+If `week` was provided, use that range. If not (or `week == "this"`), default to `$(date -v-Mon +%Y-%m-%d)` through `$(date +%Y-%m-%d)`.
 
-Only **Done** items go in "What I did this week." **In progress** items go in "Goals for next week" — they represent work that was started but not yet finished.
+The JSON has `tickets[]` with one entry per unique ticket. Each entry includes:
+- `repo`, `number`, `title`
+- `state` — `"open"`, `"closed"`, or `"unknown"`
+- `state_reason` — e.g. `"completed"`, `"not_planned"`, `"reopened"`, or `null`
+- `is_pr` — true if it's a PR (not an issue)
+- `merged` — true/false for PRs, `null` for issues
+- `days`, `sources`
 
-Note: a ticket can appear in both sections if meaningful. For example, if an issue was partially addressed (some sub-tasks done, others pending), the completed part goes in "What I did" and the remaining work goes in "Goals."
+## Phase 2: Classify Each Ticket
+
+Use the JSON state fields directly — no extra `gh` calls. Classify each ticket:
+
+- **Done**: `is_pr && merged`, OR (`!is_pr && state == "closed" && state_reason == "completed"`)
+- **Skip**: `state_reason == "not_planned"` (won't-fix, don't surface anywhere)
+- **In progress**: everything else (open issues, open PRs, reopened issues)
+
+Only **Done** items go in "What I did this week." **In progress** items go in "Goals for next week." A ticket can appear in both sections if meaningful — e.g. an issue that's partially closed via merged PR but reopened for remaining work.
 
 ## Phase 3: Organize by Project
 

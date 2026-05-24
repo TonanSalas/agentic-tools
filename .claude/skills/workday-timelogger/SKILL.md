@@ -143,10 +143,22 @@ The empty day column area in Workday is not a named element in the accessibility
    To navigate from a leaf back to the parent submenu, press `ArrowLeft`.
 2. **Re-snapshot before filling Hours/Comment**: the Hours and Comment refs change after you select a Time Type option. Don't reuse refs from before the selection.
 3. **Hours**: Fill the hours field with the entry's hours (e.g., "8").
-4. **Comment**: Fill the comment field with the ticket string (e.g., "#123: Fix auth, #456: Update API").
+4. **Comment**: Fill the comment field with the ticket string (e.g., "#123: Fix auth, #456: Update API"). Workday's comment field accepts at least 255 characters — the compact ticket-numbers format (e.g. `ao#548, ao#605, ao#606, ...`) fits easily even for 9-ticket days.
 5. **Submit**: Click OK. Snapshot to verify the entry was created (the day's Hours total in the header row updates).
 
 If there's an error, take a screenshot and report it.
+
+### Tool-call optimization
+
+A naive entry takes ~12 tool calls (snapshot → click Time Type → snapshot → click MRU → snapshot → click Dragonfly radio → snapshot → fill Hours → fill Comment → click OK → snapshot). You can cut this roughly in half by:
+
+1. **Chain idempotent actions in one Bash call** using `&&` when refs don't change between them:
+   - `mousemove X Y && mousedown && mouseup` (opens the day dialog in one call)
+   - `fill <hours-ref> "8" && fill <comment-ref> "..." && click <ok-ref>` (submit in one call)
+2. **Skip exploratory snapshots when the next click target's accessible name is stable**. After clicking Time Type, the role-name selectors `'option "Submenu Most Recently Used"'` and `'option "Dragonfly: Team extended- Python development"'` (or its child `radio`) are reliable — try clicking by name first, only snapshot if it fails.
+3. **Snapshot once per dialog state, not once per click**. The form refs (Time Type / Hours / Comment / OK) are all valid until the Time Type selection mutates the form. After selecting the time type, snapshot once to capture the new Hours/Comment refs — they're stable until OK is clicked.
+
+After the first day's entry of the week, Dragonfly is the top item in the Most Recently Used list, so the flow is the same for every Dragonfly entry.
 
 ### Extra Hours Entry
 

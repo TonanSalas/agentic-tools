@@ -11,16 +11,22 @@ Outputs a markdown table grouped by day.
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 ORG = "dragonflyic"
 GH_USERNAME = "tonansalas-dragonfly"
 GIT_AUTHOR = "tonansalas"
 LOCAL_TZ = timezone(timedelta(hours=-5))  # CDT (US Central Daylight)
+
+DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache"
+CACHE_TTL_SECONDS = 3600  # 1h for current/future weeks; closed weeks cached forever
 
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -86,15 +92,50 @@ def date_in_range(date_str, start, end):
     return start <= date_str <= end
 
 
-def fetch_item_title(repo, number):
-    """Fetch issue/PR title by number."""
+def fetch_item_meta(repo, number):
+    """Fetch issue/PR metadata (title, state, state_reason, is_pr, merged) in one call.
+
+    The /issues/{n} endpoint covers both issues and PRs; for PRs it includes a
+    `pull_request` field with `merged_at`. Returns a dict with safe defaults
+    if the call fails (e.g. ticket from another repo).
+    """
     result = subprocess.run(
-        ["gh", "api", f"repos/{repo}/issues/{number}", "--jq", ".title"],
+        ["gh", "api", f"repos/{repo}/issues/{number}"],
         capture_output=True, text=True
     )
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
-    return f"(unknown #{number})"
+    if result.returncode != 0 or not result.stdout.strip():
+        return {
+            "title": f"(unknown #{number})",
+            "state": "unknown",
+            "state_reason": None,
+            "is_pr": False,
+            "merged": None,
+        }
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {
+            "title": f"(unknown #{number})",
+            "state": "unknown",
+            "state_reason": None,
+            "is_pr": False,
+            "merged": None,
+        }
+    pr_info = data.get("pull_request") or {}
+    is_pr = bool(pr_info)
+    merged = bool(pr_info.get("merged_at")) if is_pr else None
+    return {
+        "title": data.get("title", f"(unknown #{number})"),
+        "state": (data.get("state") or "unknown").lower(),
+        "state_reason": data.get("state_reason"),
+        "is_pr": is_pr,
+        "merged": merged,
+    }
+
+
+def fetch_item_title(repo, number):
+    """Backwards-compatible: return just the title string."""
+    return fetch_item_meta(repo, number)["title"]
 
 
 def strip_conventional_prefix(title):
@@ -259,72 +300,79 @@ def gather_repo_activity(repo, start, end, api_since, api_until):
         activity[day][key(num)]["title"] = title
         activity[day][key(num)]["sources"].add("authored-issue")
 
-    # --- Fetch missing titles ---
-    known_titles = {}
-    for day_data in activity.values():
-        for k, info in day_data.items():
-            if info["title"] and k not in known_titles:
-                known_titles[k] = info["title"]
-
-    for day_data in activity.values():
-        for k, info in day_data.items():
-            if not info["title"] and k in known_titles:
-                info["title"] = known_titles[k]
-
+    # --- Collect all referenced (repo, number) keys ---
     all_keys = set()
     for day_data in activity.values():
         all_keys.update(day_data.keys())
 
+    # --- Fetch metadata (title + state) for every ticket via one API call each ---
+    meta_by_key = {}
     for k in all_keys:
-        if k not in known_titles:
-            title = fetch_item_title(k[0], k[1])
-            title = strip_conventional_prefix(title)
-            for day_data in activity.values():
-                if k in day_data and not day_data[k]["title"]:
-                    day_data[k]["title"] = title
+        meta = fetch_item_meta(k[0], k[1])
+        meta["title"] = strip_conventional_prefix(meta["title"])
+        meta_by_key[k] = meta
 
-    return activity, pr_numbers, pr_comment_numbers, review_pr_numbers, prs
+    # --- Backfill titles into per-day activity ---
+    for day_data in activity.values():
+        for k, info in day_data.items():
+            if not info["title"] and k in meta_by_key:
+                info["title"] = meta_by_key[k]["title"]
+
+    return activity, pr_numbers, pr_comment_numbers, review_pr_numbers, prs, meta_by_key
 
 
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
 
-def main():
-    parser = argparse.ArgumentParser(description="Gather GitHub activity")
-    parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
-    parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
-    args = parser.parse_args()
+# ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
 
-    start = args.start_date
-    end = args.end_date
+def cache_path_for(cache_dir, start, end):
+    return Path(cache_dir) / f"{start}_{end}.json"
 
-    # Widen the API query window by 1 day on each side to account for
-    # UTC vs local timezone offset (e.g., 10pm CDT = next day in UTC)
+
+def cache_is_fresh(path, end_date):
+    """Closed weeks (end < today) cache forever; current/future weeks expire after CACHE_TTL_SECONDS."""
+    if not path.exists():
+        return False
+    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+    if end_date < today:
+        return True
+    return (time.time() - path.stat().st_mtime) < CACHE_TTL_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# Data assembly & rendering
+# ---------------------------------------------------------------------------
+
+def gather_all(start, end):
+    """Run the full discovery + per-repo gather and return a JSON-serializable dict."""
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     end_dt = datetime.strptime(end, "%Y-%m-%d")
     api_since = (start_dt - timedelta(days=1)).strftime("%Y-%m-%d")
     api_until = (end_dt + timedelta(days=2)).strftime("%Y-%m-%d")
 
-    # Discover repos — use wider window so timezone edge cases are caught
     repos = discover_repos(api_since, api_until)
     if not repos:
-        print(f"No activity found for {GH_USERNAME} between {start} and {end}.")
-        return
+        return {
+            "generated_at": datetime.now(LOCAL_TZ).isoformat(),
+            "start": start,
+            "end": end,
+            "repos": [],
+            "days": {},
+            "tickets": [],
+        }
 
     print(f"Repos with activity: {', '.join(r.split('/')[-1] for r in repos)}", file=sys.stderr)
 
-    # Gather activity from all repos
-    # merged: day -> {(repo, number): {"title", "sources"}}
     merged_activity = defaultdict(lambda: defaultdict(lambda: {"title": "", "sources": set()}))
-    all_pr_numbers = set()       # (repo, num)
-    all_pr_comment_numbers = set()
-    all_review_pr_numbers = set()
-    all_prs = []                 # list of (repo, pr_dict)
+    merged_meta = {}  # (repo, num) -> meta dict
 
     for repo in repos:
         print(f"Gathering activity from {repo}...", file=sys.stderr)
-        activity, pr_nums, pr_comment_nums, review_pr_nums, prs = \
+        activity, _pr_nums, _pr_comment_nums, _review_pr_nums, _prs, meta_by_key = \
             gather_repo_activity(repo, start, end, api_since, api_until)
 
         for day, day_data in activity.items():
@@ -334,63 +382,154 @@ def main():
                     entry["title"] = info["title"]
                 entry["sources"].update(info["sources"])
 
-        all_pr_numbers.update((repo, n) for n in pr_nums)
-        all_pr_comment_numbers.update((repo, n) for n in pr_comment_nums)
-        all_review_pr_numbers.update((repo, n) for n in review_pr_nums)
-        all_prs.extend((repo, pr) for pr in prs)
+        merged_meta.update(meta_by_key)
 
-    # Determine display format
+    # Build per-ticket dedup view: (repo, num) -> {meta, days, sources}
+    tickets_index = {}
+    for day, day_data in merged_activity.items():
+        for (repo, num), info in day_data.items():
+            t = tickets_index.setdefault((repo, num), {
+                "days": set(),
+                "sources": set(),
+            })
+            t["days"].add(day)
+            t["sources"].update(info["sources"])
+
+    tickets_list = []
+    for (repo, num), t in sorted(tickets_index.items()):
+        meta = merged_meta.get((repo, num), {})
+        tickets_list.append({
+            "repo": repo.split("/")[-1],
+            "number": num,
+            "title": meta.get("title") or f"(unknown #{num})",
+            "state": meta.get("state", "unknown"),
+            "state_reason": meta.get("state_reason"),
+            "is_pr": meta.get("is_pr", False),
+            "merged": meta.get("merged"),
+            "days": sorted(t["days"]),
+            "sources": sorted(t["sources"]),
+        })
+
+    # Per-day view (for workday-timelogger): day -> [ticket dicts]
+    days_view = {}
+    ticket_lookup = {(t["repo"], t["number"]): t for t in tickets_list}
+    for day, day_data in merged_activity.items():
+        items = []
+        for (repo, num), info in sorted(day_data.items()):
+            short = repo.split("/")[-1]
+            base = ticket_lookup.get((short, num), {})
+            items.append({
+                "repo": short,
+                "number": num,
+                "title": info["title"] or base.get("title") or f"(unknown #{num})",
+                "state": base.get("state", "unknown"),
+                "state_reason": base.get("state_reason"),
+                "is_pr": base.get("is_pr", False),
+                "merged": base.get("merged"),
+                "sources": sorted(info["sources"]),
+            })
+        days_view[day] = items
+
+    return {
+        "generated_at": datetime.now(LOCAL_TZ).isoformat(),
+        "start": start,
+        "end": end,
+        "repos": [r.split("/")[-1] for r in repos],
+        "days": days_view,
+        "tickets": tickets_list,
+    }
+
+
+def render_markdown(data):
+    """Render the dict from gather_all() as the original markdown table."""
+    start = data["start"]
+    end = data["end"]
+    repos = data["repos"]
+
+    if not repos:
+        return f"No activity found for {GH_USERNAME} between {start} and {end}."
+
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
     multi_repo = len(repos) > 1
 
     def format_ticket(repo, num, title):
-        short_repo = repo.split("/")[-1]
         if multi_repo:
-            return f"{short_repo}#{num}: {title}"
+            return f"{repo}#{num}: {title}"
         return f"#{num}: {title}"
 
-    # Build output
-    start_dt = datetime.strptime(start, "%Y-%m-%d")
-    end_dt = datetime.strptime(end, "%Y-%m-%d")
+    lines = []
+    lines.append(f"## Weekly Activity: {start_dt.strftime('%A')} {start} - {end_dt.strftime('%A')} {end}, {start_dt.year}")
+    lines.append("")
+    lines.append("| Day       | Tickets & PRs | Source |")
+    lines.append("|-----------|---------------|--------|")
 
-    print(f"## Weekly Activity: {start_dt.strftime('%A')} {start} - {end_dt.strftime('%A')} {end}, {start_dt.year}")
-    print()
-    print("| Day       | Tickets & PRs | Source |")
-    print("|-----------|---------------|--------|")
-
-    all_tickets = set()
     current = start_dt
     while current <= end_dt:
         day_str = current.strftime("%Y-%m-%d")
         day_abbr = DAY_NAMES[current.weekday()]
         day_label = f"{day_abbr} {current.strftime('%m/%d')}"
 
-        if day_str in merged_activity and merged_activity[day_str]:
-            tickets = sorted(merged_activity[day_str].items(), key=lambda x: (x[0][0], x[0][1]))
-            ticket_parts = []
-            source_parts = []
-            for (repo, num), info in tickets:
-                title = info["title"] or f"(unknown #{num})"
-                ticket_parts.append(format_ticket(repo, num, title))
-                primary = sorted(info["sources"])[0]
-                source_parts.append(primary)
-                all_tickets.add((repo, num))
-
-            print(f"| {day_label} | {', '.join(ticket_parts)} | {', '.join(source_parts)} |")
+        items = data["days"].get(day_str, [])
+        if items:
+            ticket_parts = [format_ticket(it["repo"], it["number"], it["title"]) for it in items]
+            source_parts = [it["sources"][0] if it["sources"] else "" for it in items]
+            lines.append(f"| {day_label} | {', '.join(ticket_parts)} | {', '.join(source_parts)} |")
         else:
-            print(f"| {day_label} | No activity | |")
-
+            lines.append(f"| {day_label} | No activity | |")
         current += timedelta(days=1)
 
     # Summary
-    all_pr_keys = (all_pr_numbers | all_pr_comment_numbers | all_review_pr_numbers) & all_tickets
-    merged_count = sum(1 for repo, pr in all_prs if (repo, pr["number"]) in all_pr_keys and pr.get("mergedAt"))
-    open_count = len(all_pr_keys) - merged_count
+    pr_tickets = [t for t in data["tickets"] if t["is_pr"]]
+    merged_count = sum(1 for t in pr_tickets if t["merged"])
+    open_count = len(pr_tickets) - merged_count
 
-    print()
-    print("### Summary")
-    print(f"- Repos: {', '.join(r.split('/')[-1] for r in repos)}")
-    print(f"- Total Tickets Touched: {len(all_tickets)}")
-    print(f"- Total PRs: {len(all_pr_keys)} ({merged_count} merged, {open_count} open)")
+    lines.append("")
+    lines.append("### Summary")
+    lines.append(f"- Repos: {', '.join(repos)}")
+    lines.append(f"- Total Tickets Touched: {len(data['tickets'])}")
+    lines.append(f"- Total PRs: {len(pr_tickets)} ({merged_count} merged, {open_count} open)")
+
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Gather GitHub activity")
+    parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
+    parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
+    parser.add_argument("--json", action="store_true",
+                        help="Emit structured JSON (with ticket state) instead of markdown")
+    parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR),
+                        help="Cache directory (default: <skill>/cache/)")
+    parser.add_argument("--no-cache", action="store_true",
+                        help="Force a fresh fetch and overwrite any cached result")
+    args = parser.parse_args()
+
+    start = args.start_date
+    end = args.end_date
+    cache_dir = Path(args.cache_dir)
+    cache_path = cache_path_for(cache_dir, start, end)
+
+    data = None
+    if not args.no_cache and cache_is_fresh(cache_path, end):
+        try:
+            data = json.loads(cache_path.read_text())
+            print(f"Using cache: {cache_path}", file=sys.stderr)
+        except (json.JSONDecodeError, OSError):
+            data = None
+
+    if data is None:
+        data = gather_all(start, end)
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(data, indent=2))
+        except OSError as e:
+            print(f"Warning: failed to write cache: {e}", file=sys.stderr)
+
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print(render_markdown(data))
 
 
 if __name__ == "__main__":

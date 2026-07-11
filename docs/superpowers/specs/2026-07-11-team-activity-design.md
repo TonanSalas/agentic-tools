@@ -30,15 +30,25 @@ One new skill: `.claude/skills/team-activity/`
   SKILL.md
   scripts/
     gather_pr_merges.py
+    gather_linear_comments.py
   cache/                      # gitignored, created at runtime
 ```
 
 - `gather_pr_merges.py` handles the GitHub side: a standalone, cacheable, deterministic script,
   following the same conventions as `weekly-activity/scripts/gather_activity.py`.
-- The Linear side has **no script**. Linear MCP tools are only reachable from within a Claude
-  Code session, not from a Bash-invoked Python process, so `SKILL.md` instructs Claude to call
-  the connected Linear MCP tools directly at runtime and assemble the comment tallies itself.
+- `gather_linear_comments.py` handles the Linear side: a standalone script authenticated via a
+  personal API key (`LINEAR_API_KEY` env var, already added to `.env`), calling Linear's GraphQL
+  API directly. No MCP dependency.
 - `SKILL.md` orchestrates both parts and renders one combined markdown report.
+
+### Why GraphQL instead of MCP
+
+The design originally called for Linear MCP tools, but no Linear MCP server was connected. A
+personal API key was added to `.env` and tested directly against `https://api.linear.app/graphql`
+(confirmed working: `{ viewer { id name email } }` resolved successfully, auth via the
+`Authorization` header with the raw key, no `Bearer` prefix). Since a direct GraphQL script gives
+deterministic, cacheable output consistent with the GitHub side — and avoids depending on an
+MCP server's unknown/unstable tool surface — the design now uses GraphQL directly instead of MCP.
 
 ## Component: `gather_pr_merges.py` (GitHub, org-wide PR merges)
 
@@ -88,33 +98,72 @@ python3 scripts/gather_pr_merges.py --start-date YYYY-MM-DD --end-date YYYY-MM-D
 
 Mirrors `gather_activity.py`'s flags for consistency.
 
-## Component: Linear comments (MCP-driven, no script)
+## Component: `gather_linear_comments.py` (Linear, org-wide comment volume)
 
-### Prerequisite (one-time setup)
+### Prerequisite
 
-A Linear MCP server must be connected before this part of the skill can run. `SKILL.md` documents
-this as a setup step (adding the server via `claude mcp add`, then authenticating) and the skill
-checks for Linear MCP tool availability before attempting to use it.
+`LINEAR_API_KEY` (a personal API key from Linear Settings → Security & access → Personal API
+keys) must be set — already added to the project's `.env`. The script loads it from the
+environment (loading `.env` itself, or relying on it being exported — consistent with how the
+rest of the repo handles local env/config).
 
-### Runtime flow
+### Auth
 
-Since the exact tool names/shapes exposed by the connected Linear MCP server aren't known until
-it's set up, `SKILL.md` describes the **goal** rather than hardcoding tool calls:
+`POST https://api.linear.app/graphql` with header `Authorization: <raw key>` (no `Bearer`
+prefix) — confirmed working via a manual `viewer { id name email }` test query.
 
-1. Find Linear issues/tickets updated within the date range, across all teams in the workspace
-   (not filtered to one team).
-2. For each such issue, fetch its comments.
-3. Filter to comments actually created within the date range (an issue can be "updated" in-range
-   while having older comments, or vice versa).
-4. Tally:
-   - Comment count per ticket (ticket identifier, e.g. `ENG-231`)
+### Query
+
+Linear's GraphQL API exposes a top-level `comments` collection that can be filtered and paginated
+server-side, without needing to first enumerate issues:
+
+```graphql
+query($after: String, $gte: DateTimeOrDuration!, $lte: DateTimeOrDuration!) {
+  comments(
+    first: 100
+    after: $after
+    filter: { createdAt: { gte: $gte, lte: $lte } }
+    orderBy: createdAt
+  ) {
+    nodes {
+      id
+      createdAt
+      issue { identifier title team { key name } }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+```
+
+This covers every team in the workspace by default (no team filter applied) and returns
+comments already scoped to the date range — no client-side filtering of an issue's full comment
+history needed, and no separate "list issues then fetch comments per issue" round-trips.
+
+### Processing
+
+1. Page through `comments` until `hasNextPage` is false, converting each `createdAt` (UTC) to
+   local-tz `YYYY-MM-DD` (reuse the same conversion logic as the GitHub script).
+2. Tally:
+   - Comment count per ticket (`issue.identifier`, e.g. `DRA-221`)
    - Comment count per day (sum across all tickets)
 
 ### Output
 
-Two markdown tables:
+JSON mode (for the skill to consume) plus two rendered markdown tables:
 - **Linear Comments by Day** — day, total comment count
 - **Linear Comments by Ticket** — ticket ID, comment count (sorted descending by count)
+
+### Caching
+
+Same rule as `gather_pr_merges.py`: cache to
+`.claude/skills/team-activity/cache/linear_<start>_<end>.json`, closed ranges cached indefinitely,
+current/future ranges expire after 1 hour.
+
+### CLI interface
+
+```
+python3 scripts/gather_linear_comments.py --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--json] [--no-cache] [--cache-dir PATH]
+```
 
 ## Combined report format
 
@@ -140,15 +189,15 @@ Two markdown tables:
 ...
 ```
 
-If the Linear MCP server isn't connected or a call fails, the PR section is still shown, with a
+If `LINEAR_API_KEY` is missing or a GraphQL call fails, the PR section is still shown, with a
 note that the Linear section was skipped and why.
 
 ## Error handling
 
 - `gh search prs` failures: warn to stderr, treat as zero results for the affected page rather
   than crashing (same pattern as `gh_api`/`gh_search` in `gather_activity.py`).
-- Linear MCP unavailable/not connected: skip the Linear section, tell the user how to connect it,
-  still print the PR section.
+- `LINEAR_API_KEY` missing or GraphQL request failing (auth error, network error, non-200):
+  print a warning to stderr, skip the Linear section, still print the PR section.
 - Large date ranges (e.g. > 90 days): the skill warns before running, since org-wide PR search and
   per-issue comment fetching both scale with range size; suggest narrowing the range.
 - Missing/malformed dates: reuse `weekly-activity`'s default (current week, Monday through today)
@@ -161,12 +210,15 @@ This repo has no automated test suite (skills-only, no CI) — verification is m
 - Run `gather_pr_merges.py` for a known past week and spot-check the daily/repo totals against
   GitHub's web search UI (`merged:<range> org:dragonflyic`).
 - Spot-check one Linear ticket's comment count against the Linear UI for the same date range.
-- Confirm the combined report degrades gracefully when Linear MCP is intentionally disconnected.
+- Confirm the combined report degrades gracefully when `LINEAR_API_KEY` is unset/invalid.
 
 ## Open questions / risks
 
-- The exact Linear MCP tool surface is unknown until connected — `SKILL.md` will need a short
-  adjustment pass once the server is added and its actual tool names are visible.
 - `gh search prs` result caps: GitHub search API results may be capped (e.g. 1000 results); a
   very active month across the whole org could theoretically hit this. Not a concern for typical
   weekly/monthly ranges but worth a comment in the script.
+- Linear GraphQL pagination/rate limits: personal API keys are subject to Linear's standard rate
+  limits; a very large date range could require many pages of 100 comments each. Same "warn on
+  large ranges" mitigation as the GitHub side covers this.
+- `.env` now holds `LINEAR_API_KEY` and has been added to `.gitignore` to prevent accidental
+  commits; the script must never print or log the key value.

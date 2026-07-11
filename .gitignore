@@ -2,3 +2,4 @@
 .playwright-cli/
 .playwright-mcp/
 .claude/skills/weekly-activity/cache/
+.env

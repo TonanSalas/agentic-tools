@@ -94,6 +94,16 @@ def fetch_merged_prs(api_since, api_until):
     return prs
 
 
+def aggregate_days(pr_list):
+    """Build the per-day/per-repo summary from a (possibly filtered) list of PR dicts."""
+    days = {}
+    for pr in pr_list:
+        entry = days.setdefault(pr["day"], {"total": 0, "by_repo": {}})
+        entry["total"] += 1
+        entry["by_repo"][pr["repo"]] = entry["by_repo"].get(pr["repo"], 0) + 1
+    return days
+
+
 def gather_all(start, end):
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     end_dt = datetime.strptime(end, "%Y-%m-%d")
@@ -102,7 +112,6 @@ def gather_all(start, end):
 
     prs = fetch_merged_prs(api_since, api_until)
 
-    days = {}
     pr_list = []
     for pr in prs:
         day = parse_date(pr.get("mergedAt"))
@@ -110,9 +119,6 @@ def gather_all(start, end):
             continue
         repo = (pr.get("repository") or {}).get("name", "unknown")
         author = (pr.get("author") or {}).get("login") or "unknown"
-        entry = days.setdefault(day, {"total": 0, "by_repo": {}})
-        entry["total"] += 1
-        entry["by_repo"][repo] = entry["by_repo"].get(repo, 0) + 1
         pr_list.append({
             "day": day,
             "repo": repo,
@@ -128,7 +134,7 @@ def gather_all(start, end):
         "generated_at": datetime.now(LOCAL_TZ).isoformat(),
         "start": start,
         "end": end,
-        "days": days,
+        "days": aggregate_days(pr_list),
         "prs": pr_list,
     }
 
@@ -137,15 +143,17 @@ def render_markdown(data):
     start, end = data["start"], data["end"]
     days = data["days"]
     prs = data.get("prs", [])
+    author_filter = data.get("author_filter")
 
     if not days:
-        return f"No merged PRs found across {ORG} between {start} and {end}."
+        suffix = f" authored by {author_filter}" if author_filter else ""
+        return f"No merged PRs found across {ORG} between {start} and {end}{suffix}."
 
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     end_dt = datetime.strptime(end, "%Y-%m-%d")
 
     lines = []
-    lines.append("### PRs Merged")
+    lines.append("### PRs Merged" + (f" (author: {author_filter})" if author_filter else ""))
     lines.append("")
     lines.append("| Day       | Repo | PR | Title | Author | URL |")
     lines.append("|-----------|------|----|-------|--------|-----|")
@@ -195,6 +203,7 @@ def main():
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
     parser.add_argument("--json", action="store_true", help="Emit structured JSON instead of markdown")
+    parser.add_argument("--author", help="Filter to PRs authored by this GitHub login (case-insensitive, exact match)")
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args()
@@ -207,7 +216,11 @@ def main():
     if not args.no_cache and cache_is_fresh(cache_path, end):
         try:
             data = json.loads(cache_path.read_text())
-            print(f"Using cache: {cache_path}", file=sys.stderr)
+            if "prs" not in data:
+                # Stale cache from before per-PR records were added — refetch.
+                data = None
+            else:
+                print(f"Using cache: {cache_path}", file=sys.stderr)
         except (json.JSONDecodeError, OSError):
             data = None
 
@@ -218,6 +231,18 @@ def main():
             cache_path.write_text(json.dumps(data, indent=2))
         except OSError as e:
             print(f"Warning: failed to write cache: {e}", file=sys.stderr)
+
+    # Author filtering is applied after cache read/write so the cache always holds
+    # the full, unfiltered org-wide result and can be reused across different --author values.
+    if args.author:
+        author_lower = args.author.lower()
+        filtered_prs = [p for p in data["prs"] if p["author"].lower() == author_lower]
+        data = {
+            **data,
+            "prs": filtered_prs,
+            "days": aggregate_days(filtered_prs),
+            "author_filter": args.author,
+        }
 
     if args.json:
         print(json.dumps(data, indent=2))

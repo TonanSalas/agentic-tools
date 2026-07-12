@@ -97,6 +97,19 @@ def fetch_comments(api_since, api_until, api_key):
     return comments
 
 
+def aggregate_comments(comment_list):
+    """Build the day/ticket/ticket-author summaries from a (possibly filtered) list of comment dicts."""
+    days = {}
+    tickets = {}
+    ticket_authors = {}
+    for c in comment_list:
+        days[c["day"]] = days.get(c["day"], 0) + 1
+        tickets[c["ticket"]] = tickets.get(c["ticket"], 0) + 1
+        by_author = ticket_authors.setdefault(c["ticket"], {})
+        by_author[c["author"]] = by_author.get(c["author"], 0) + 1
+    return days, tickets, ticket_authors
+
+
 def gather_all(start, end, api_key):
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     end_dt = datetime.strptime(end, "%Y-%m-%d")
@@ -105,19 +118,16 @@ def gather_all(start, end, api_key):
 
     comments = fetch_comments(api_since, api_until, api_key)
 
-    days = {}
-    tickets = {}
-    ticket_authors = {}
+    comment_list = []
     for c in comments:
         day = parse_date(c.get("createdAt"))
         if not day or not (start <= day <= end):
             continue
-        days[day] = days.get(day, 0) + 1
         ticket = (c.get("issue") or {}).get("identifier", "unknown")
-        tickets[ticket] = tickets.get(ticket, 0) + 1
         author = (c.get("user") or {}).get("name") or "Unknown"
-        by_author = ticket_authors.setdefault(ticket, {})
-        by_author[author] = by_author.get(author, 0) + 1
+        comment_list.append({"day": day, "ticket": ticket, "author": author})
+
+    days, tickets, ticket_authors = aggregate_comments(comment_list)
 
     return {
         "generated_at": datetime.now(LOCAL_TZ).isoformat(),
@@ -126,6 +136,7 @@ def gather_all(start, end, api_key):
         "days": days,
         "tickets": tickets,
         "ticket_authors": ticket_authors,
+        "comments": comment_list,
     }
 
 
@@ -134,15 +145,17 @@ def render_markdown(data):
     days = data["days"]
     tickets = data["tickets"]
     ticket_authors = data.get("ticket_authors", {})
+    author_filter = data.get("author_filter")
 
     if not days:
-        return f"No Linear comments found between {start} and {end}."
+        suffix = f" from {author_filter}" if author_filter else ""
+        return f"No Linear comments found between {start} and {end}{suffix}."
 
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     end_dt = datetime.strptime(end, "%Y-%m-%d")
 
     lines = []
-    lines.append("### Linear Comments by Ticket and Author")
+    lines.append("### Linear Comments by Ticket and Author" + (f" (author: {author_filter})" if author_filter else ""))
     lines.append("")
     lines.append("| Ticket  | Author | Comments |")
     lines.append("|---------|--------|----------|")
@@ -195,6 +208,7 @@ def main():
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
     parser.add_argument("--json", action="store_true", help="Emit structured JSON instead of markdown")
+    parser.add_argument("--author", help="Filter to comments from this Linear display name (case-insensitive, exact match)")
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args()
@@ -212,7 +226,11 @@ def main():
     if not args.no_cache and cache_is_fresh(cache_path, end):
         try:
             data = json.loads(cache_path.read_text())
-            print(f"Using cache: {cache_path}", file=sys.stderr)
+            if "comments" not in data:
+                # Stale cache from before per-comment records were added — refetch.
+                data = None
+            else:
+                print(f"Using cache: {cache_path}", file=sys.stderr)
         except (json.JSONDecodeError, OSError):
             data = None
 
@@ -223,6 +241,21 @@ def main():
             cache_path.write_text(json.dumps(data, indent=2))
         except OSError as e:
             print(f"Warning: failed to write cache: {e}", file=sys.stderr)
+
+    # Author filtering is applied after cache read/write so the cache always holds
+    # the full, unfiltered workspace-wide result and can be reused across different --author values.
+    if args.author:
+        author_lower = args.author.lower()
+        filtered_comments = [c for c in data["comments"] if c["author"].lower() == author_lower]
+        days, tickets, ticket_authors = aggregate_comments(filtered_comments)
+        data = {
+            **data,
+            "comments": filtered_comments,
+            "days": days,
+            "tickets": tickets,
+            "ticket_authors": ticket_authors,
+            "author_filter": args.author,
+        }
 
     if args.json:
         print(json.dumps(data, indent=2))

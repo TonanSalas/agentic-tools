@@ -86,8 +86,14 @@ Summary, Linear Comments by Ticket and Author, Linear Comments by Day, Linear Co
 If the Linear section was skipped, note why at the top of the report rather than silently
 omitting it.
 
-### Optional flags (for other skills)
+### Optional flags (for other skills, or for the user)
 
+- `--author <name>` on either script — filter results to one person, applied after fetching/
+  caching so the underlying cache stays the full org-wide result. For `gather_pr_merges.py`, pass
+  the exact GitHub login (e.g. `tonansalas-dragonfly`), case-insensitive. For
+  `gather_linear_comments.py`, pass the exact Linear display name (e.g. `Tonan Salas`),
+  case-insensitive. If the user asks "which of these are mine" or similar, re-run both scripts
+  with `--author` set to their identity rather than eyeballing the Author column.
 - `--json` on either script — emit structured JSON instead of markdown, for programmatic use by
   another skill.
 - `--no-cache` — force a fresh fetch even if cached.
@@ -96,4 +102,6 @@ omitting it.
 ### Caching
 
 Both scripts cache to `<skill>/cache/` (gitignored). Closed date ranges (end date before today)
-cache indefinitely; ranges including today/future expire after 1 hour.
+cache indefinitely; ranges including today/future expire after 1 hour. The cache always stores the
+full, unfiltered result — `--author` filters after reading the cache, so different `--author`
+values for the same date range don't trigger separate fetches.

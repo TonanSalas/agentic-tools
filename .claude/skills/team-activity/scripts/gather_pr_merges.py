@@ -143,17 +143,17 @@ def render_markdown(data):
     start, end = data["start"], data["end"]
     days = data["days"]
     prs = data.get("prs", [])
-    author_filter = data.get("author_filter")
+    author_filter = data["author_filter"]
+    author_days = data.get("author_days", {})
 
     if not days:
-        suffix = f" authored by {author_filter}" if author_filter else ""
-        return f"No merged PRs found across {ORG} between {start} and {end}{suffix}."
+        return f"No merged PRs found across {ORG} between {start} and {end}."
 
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     end_dt = datetime.strptime(end, "%Y-%m-%d")
 
     lines = []
-    lines.append("### PRs Merged" + (f" (author: {author_filter})" if author_filter else ""))
+    lines.append("### PRs Merged")
     lines.append("")
     lines.append("| Day       | Repo | PR | Title | Author | URL |")
     lines.append("|-----------|------|----|-------|--------|-----|")
@@ -165,23 +165,25 @@ def render_markdown(data):
         )
 
     lines.append("")
-    lines.append("### PRs Merged — Daily Summary")
+    lines.append(f"### PRs Merged — Daily Summary (Total vs {author_filter})")
     lines.append("")
-    lines.append("| Day       | Total | By Repo |")
-    lines.append("|-----------|-------|---------|")
+    lines.append(f"| Day       | Total | {author_filter} | By Repo |")
+    lines.append("|-----------|-------|-------|---------|")
 
     current = start_dt
     while current <= end_dt:
         day_str = current.strftime("%Y-%m-%d")
         day_abbr = DAY_NAMES[current.weekday()]
         entry = days.get(day_str, {"total": 0, "by_repo": {}})
+        mine = author_days.get(day_str, {"total": 0})["total"]
         by_repo = ", ".join(f"{repo}: {count}" for repo, count in sorted(entry["by_repo"].items()))
-        lines.append(f"| {day_abbr} {current.strftime('%m/%d')} | {entry['total']} | {by_repo or '-'} |")
+        lines.append(f"| {day_abbr} {current.strftime('%m/%d')} | {entry['total']} | {mine} | {by_repo or '-'} |")
         current += timedelta(days=1)
 
     total = sum(e["total"] for e in days.values())
+    author_total = sum(e["total"] for e in author_days.values())
     lines.append("")
-    lines.append(f"**Total merged PRs:** {total}")
+    lines.append(f"**Total merged PRs:** {total} ({author_total} by {author_filter})")
     return "\n".join(lines)
 
 
@@ -203,7 +205,8 @@ def main():
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
     parser.add_argument("--json", action="store_true", help="Emit structured JSON instead of markdown")
-    parser.add_argument("--author", help="Filter to PRs authored by this GitHub login (case-insensitive, exact match)")
+    parser.add_argument("--author", required=True,
+                         help="GitHub login to compare against the org-wide total (case-insensitive, exact match)")
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args()
@@ -232,17 +235,12 @@ def main():
         except OSError as e:
             print(f"Warning: failed to write cache: {e}", file=sys.stderr)
 
-    # Author filtering is applied after cache read/write so the cache always holds
-    # the full, unfiltered org-wide result and can be reused across different --author values.
-    if args.author:
-        author_lower = args.author.lower()
-        filtered_prs = [p for p in data["prs"] if p["author"].lower() == author_lower]
-        data = {
-            **data,
-            "prs": filtered_prs,
-            "days": aggregate_days(filtered_prs),
-            "author_filter": args.author,
-        }
+    # The comparison against --author is computed after cache read/write, on top of the
+    # full org-wide result, so the cache stays author-independent and reusable.
+    author_lower = args.author.lower()
+    author_prs = [p for p in data["prs"] if p["author"].lower() == author_lower]
+    data["author_filter"] = args.author
+    data["author_days"] = aggregate_days(author_prs)
 
     if args.json:
         print(json.dumps(data, indent=2))

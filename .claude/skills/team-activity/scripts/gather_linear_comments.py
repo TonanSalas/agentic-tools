@@ -145,17 +145,18 @@ def render_markdown(data):
     days = data["days"]
     tickets = data["tickets"]
     ticket_authors = data.get("ticket_authors", {})
-    author_filter = data.get("author_filter")
+    author_filter = data["author_filter"]
+    author_days = data.get("author_days", {})
+    author_tickets = data.get("author_tickets", {})
 
     if not days:
-        suffix = f" from {author_filter}" if author_filter else ""
-        return f"No Linear comments found between {start} and {end}{suffix}."
+        return f"No Linear comments found between {start} and {end}."
 
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     end_dt = datetime.strptime(end, "%Y-%m-%d")
 
     lines = []
-    lines.append("### Linear Comments by Ticket and Author" + (f" (author: {author_filter})" if author_filter else ""))
+    lines.append("### Linear Comments by Ticket and Author")
     lines.append("")
     lines.append("| Ticket  | Author | Comments |")
     lines.append("|---------|--------|----------|")
@@ -165,28 +166,29 @@ def render_markdown(data):
             lines.append(f"| {ticket} | {author} | {count} |")
 
     lines.append("")
-    lines.append("### Linear Comments by Day")
+    lines.append(f"### Linear Comments by Day (Total vs {author_filter})")
     lines.append("")
-    lines.append("| Day       | Comments |")
-    lines.append("|-----------|----------|")
+    lines.append(f"| Day       | Total | {author_filter} |")
+    lines.append("|-----------|-------|-------|")
     current = start_dt
     while current <= end_dt:
         day_str = current.strftime("%Y-%m-%d")
         day_abbr = DAY_NAMES[current.weekday()]
-        lines.append(f"| {day_abbr} {current.strftime('%m/%d')} | {days.get(day_str, 0)} |")
+        lines.append(f"| {day_abbr} {current.strftime('%m/%d')} | {days.get(day_str, 0)} | {author_days.get(day_str, 0)} |")
         current += timedelta(days=1)
 
     lines.append("")
-    lines.append("### Linear Comments by Ticket")
+    lines.append(f"### Linear Comments by Ticket (Total vs {author_filter})")
     lines.append("")
-    lines.append("| Ticket  | Comments |")
-    lines.append("|---------|----------|")
+    lines.append(f"| Ticket  | Total | {author_filter} |")
+    lines.append("|---------|-------|-------|")
     for ticket, count in sorted(tickets.items(), key=lambda kv: (-kv[1], kv[0])):
-        lines.append(f"| {ticket} | {count} |")
+        lines.append(f"| {ticket} | {count} | {author_tickets.get(ticket, 0)} |")
 
     total = sum(days.values())
+    author_total = sum(author_days.values())
     lines.append("")
-    lines.append(f"**Total comments:** {total}")
+    lines.append(f"**Total comments:** {total} ({author_total} by {author_filter})")
     return "\n".join(lines)
 
 
@@ -208,7 +210,8 @@ def main():
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
     parser.add_argument("--json", action="store_true", help="Emit structured JSON instead of markdown")
-    parser.add_argument("--author", help="Filter to comments from this Linear display name (case-insensitive, exact match)")
+    parser.add_argument("--author", required=True,
+                         help="Linear display name to compare against the workspace-wide total (case-insensitive, exact match)")
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args()
@@ -242,20 +245,14 @@ def main():
         except OSError as e:
             print(f"Warning: failed to write cache: {e}", file=sys.stderr)
 
-    # Author filtering is applied after cache read/write so the cache always holds
-    # the full, unfiltered workspace-wide result and can be reused across different --author values.
-    if args.author:
-        author_lower = args.author.lower()
-        filtered_comments = [c for c in data["comments"] if c["author"].lower() == author_lower]
-        days, tickets, ticket_authors = aggregate_comments(filtered_comments)
-        data = {
-            **data,
-            "comments": filtered_comments,
-            "days": days,
-            "tickets": tickets,
-            "ticket_authors": ticket_authors,
-            "author_filter": args.author,
-        }
+    # The comparison against --author is computed after cache read/write, on top of the
+    # full workspace-wide result, so the cache stays author-independent and reusable.
+    author_lower = args.author.lower()
+    author_comments = [c for c in data["comments"] if c["author"].lower() == author_lower]
+    author_days, author_tickets, _ = aggregate_comments(author_comments)
+    data["author_filter"] = args.author
+    data["author_days"] = author_days
+    data["author_tickets"] = author_tickets
 
     if args.json:
         print(json.dumps(data, indent=2))

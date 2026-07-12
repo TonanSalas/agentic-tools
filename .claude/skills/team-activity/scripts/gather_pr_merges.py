@@ -37,6 +37,8 @@ query($q: String!, $after: String) {
         number
         title
         mergedAt
+        url
+        author { login }
         repository { name }
       }
     }
@@ -101,26 +103,40 @@ def gather_all(start, end):
     prs = fetch_merged_prs(api_since, api_until)
 
     days = {}
+    pr_list = []
     for pr in prs:
         day = parse_date(pr.get("mergedAt"))
         if not day or not (start <= day <= end):
             continue
         repo = (pr.get("repository") or {}).get("name", "unknown")
+        author = (pr.get("author") or {}).get("login") or "unknown"
         entry = days.setdefault(day, {"total": 0, "by_repo": {}})
         entry["total"] += 1
         entry["by_repo"][repo] = entry["by_repo"].get(repo, 0) + 1
+        pr_list.append({
+            "day": day,
+            "repo": repo,
+            "number": pr.get("number"),
+            "title": pr.get("title", ""),
+            "author": author,
+            "url": pr.get("url", ""),
+        })
+
+    pr_list.sort(key=lambda p: (p["day"], p["repo"], p["number"]))
 
     return {
         "generated_at": datetime.now(LOCAL_TZ).isoformat(),
         "start": start,
         "end": end,
         "days": days,
+        "prs": pr_list,
     }
 
 
 def render_markdown(data):
     start, end = data["start"], data["end"]
     days = data["days"]
+    prs = data.get("prs", [])
 
     if not days:
         return f"No merged PRs found across {ORG} between {start} and {end}."
@@ -130,6 +146,18 @@ def render_markdown(data):
 
     lines = []
     lines.append("### PRs Merged")
+    lines.append("")
+    lines.append("| Day       | Repo | PR | Title | Author | URL |")
+    lines.append("|-----------|------|----|-------|--------|-----|")
+    for pr in prs:
+        day_dt = datetime.strptime(pr["day"], "%Y-%m-%d")
+        day_label = f"{DAY_NAMES[day_dt.weekday()]} {day_dt.strftime('%m/%d')}"
+        lines.append(
+            f"| {day_label} | {pr['repo']} | #{pr['number']} | {pr['title']} | {pr['author']} | {pr['url']} |"
+        )
+
+    lines.append("")
+    lines.append("### PRs Merged — Daily Summary")
     lines.append("")
     lines.append("| Day       | Total | By Repo |")
     lines.append("|-----------|-------|---------|")

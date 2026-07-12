@@ -1,6 +1,6 @@
 ---
 name: team-activity
-description: Report org-wide merged PR counts (per day, per repo) across all dragonflyic repos, and Linear comment volume (per ticket, per day) across the whole workspace, for a date range. Use for team activity, team velocity, or communication-volume reports — not for personal activity (use weekly-activity for that).
+description: Report org-wide merged PRs (per PR, with author, plus per-day/per-repo totals) across all dragonflyic repos, and Linear comment volume (per ticket and author, plus per-day/per-ticket totals) across the whole workspace, for a date range. Use for team activity, team velocity, or communication-volume reports — not for personal activity (use weekly-activity for that).
 user-invocable: true
 allowed-tools: Bash
 arguments:
@@ -14,8 +14,14 @@ arguments:
 Report two things for a date range, across the whole `dragonflyic` org / Linear workspace (not
 scoped to one person):
 
-1. Merged PRs per day, with a per-repo breakdown (`scripts/gather_pr_merges.py`).
-2. Linear comment volume per ticket and per day (`scripts/gather_linear_comments.py`).
+1. Every merged PR, with its author and URL, plus a per-day/per-repo summary
+   (`scripts/gather_pr_merges.py`).
+2. Linear comment volume broken down by ticket and author, plus per-day and per-ticket summaries
+   (`scripts/gather_linear_comments.py`).
+
+Author columns exist so PRs/comments can be attributed to a specific person — don't assume every
+row belongs to the user who invoked the skill; always check the Author column before claiming an
+item as theirs.
 
 > **Performance note**: This skill just runs two Python scripts and prints their output — no
 > reasoning needed. When invoking it non-interactively from another skill, prefer launching via
@@ -75,8 +81,10 @@ Emit a top-level header with the date range, then both scripts' output together 
 ## Team Activity: $START_DATE - $END_DATE
 ```
 
-followed by, in this order: PRs Merged, Linear Comments by Day, Linear Comments by Ticket. If the
-Linear section was skipped, note why at the top of the report rather than silently omitting it.
+followed by, in this order: PRs Merged (full per-PR list with author/URL), PRs Merged — Daily
+Summary, Linear Comments by Ticket and Author, Linear Comments by Day, Linear Comments by Ticket.
+If the Linear section was skipped, note why at the top of the report rather than silently
+omitting it.
 
 ### Optional flags (for other skills)
 

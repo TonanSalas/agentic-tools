@@ -34,6 +34,7 @@ query($after: String, $gte: DateTimeOrDuration!, $lte: DateTimeOrDuration!) {
       id
       createdAt
       issue { identifier }
+      user { name }
     }
     pageInfo { hasNextPage endCursor }
   }
@@ -106,6 +107,7 @@ def gather_all(start, end, api_key):
 
     days = {}
     tickets = {}
+    ticket_authors = {}
     for c in comments:
         day = parse_date(c.get("createdAt"))
         if not day or not (start <= day <= end):
@@ -113,6 +115,9 @@ def gather_all(start, end, api_key):
         days[day] = days.get(day, 0) + 1
         ticket = (c.get("issue") or {}).get("identifier", "unknown")
         tickets[ticket] = tickets.get(ticket, 0) + 1
+        author = (c.get("user") or {}).get("name") or "Unknown"
+        by_author = ticket_authors.setdefault(ticket, {})
+        by_author[author] = by_author.get(author, 0) + 1
 
     return {
         "generated_at": datetime.now(LOCAL_TZ).isoformat(),
@@ -120,6 +125,7 @@ def gather_all(start, end, api_key):
         "end": end,
         "days": days,
         "tickets": tickets,
+        "ticket_authors": ticket_authors,
     }
 
 
@@ -127,6 +133,7 @@ def render_markdown(data):
     start, end = data["start"], data["end"]
     days = data["days"]
     tickets = data["tickets"]
+    ticket_authors = data.get("ticket_authors", {})
 
     if not days:
         return f"No Linear comments found between {start} and {end}."
@@ -135,6 +142,16 @@ def render_markdown(data):
     end_dt = datetime.strptime(end, "%Y-%m-%d")
 
     lines = []
+    lines.append("### Linear Comments by Ticket and Author")
+    lines.append("")
+    lines.append("| Ticket  | Author | Comments |")
+    lines.append("|---------|--------|----------|")
+    for ticket in sorted(ticket_authors.keys()):
+        by_author = ticket_authors[ticket]
+        for author, count in sorted(by_author.items(), key=lambda kv: (-kv[1], kv[0])):
+            lines.append(f"| {ticket} | {author} | {count} |")
+
+    lines.append("")
     lines.append("### Linear Comments by Day")
     lines.append("")
     lines.append("| Day       | Comments |")

@@ -69,12 +69,15 @@ def run_query(query, variables, api_key):
         return None
 
 
+MAX_PAGES = 200  # generous cap (~20k comments at 100/page) to guard against a misbehaving API looping forever
+
+
 def fetch_comments(api_since, api_until, api_key):
     comments = []
     after = None
     gte = f"{api_since}T00:00:00.000Z"
     lte = f"{api_until}T23:59:59.999Z"
-    while True:
+    for _ in range(MAX_PAGES):
         result = run_query(COMMENTS_QUERY, {"after": after, "gte": gte, "lte": lte}, api_key)
         if not result:
             break
@@ -88,6 +91,8 @@ def fetch_comments(api_since, api_until, api_key):
             after = page_info.get("endCursor")
         else:
             break
+    else:
+        print(f"Warning: hit MAX_PAGES ({MAX_PAGES}) pagination cap; results may be incomplete", file=sys.stderr)
     return comments
 
 
@@ -130,7 +135,7 @@ def render_markdown(data):
     end_dt = datetime.strptime(end, "%Y-%m-%d")
 
     lines = []
-    lines.append(f"### Linear Comments by Day: {start} - {end}")
+    lines.append("### Linear Comments by Day")
     lines.append("")
     lines.append("| Day       | Comments |")
     lines.append("|-----------|----------|")
@@ -146,7 +151,7 @@ def render_markdown(data):
     lines.append("")
     lines.append("| Ticket  | Comments |")
     lines.append("|---------|----------|")
-    for ticket, count in sorted(tickets.items(), key=lambda kv: -kv[1]):
+    for ticket, count in sorted(tickets.items(), key=lambda kv: (-kv[1], kv[0])):
         lines.append(f"| {ticket} | {count} |")
 
     total = sum(days.values())

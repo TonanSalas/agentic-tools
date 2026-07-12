@@ -5,6 +5,10 @@ Gather org-wide merged-PR counts across all dragonflyic repos for a date range.
 Uses a single paginated GitHub GraphQL search (not gh search prs --json, which
 does not expose mergedAt) to get exact merge timestamps for every PR merged in
 the org during the range, then buckets by local-tz day and by repo.
+
+Note: GitHub's search API caps results (historically ~1000 for a single query).
+An extremely high-volume range across the whole org could theoretically hit
+this cap and undercount; not a concern for typical weekly/monthly ranges.
 """
 
 import argparse
@@ -53,12 +57,15 @@ def parse_date(iso_str):
         return iso_str[:10]
 
 
+MAX_PAGES = 200  # generous cap (~10k PRs at 50/page) to guard against a misbehaving API looping forever
+
+
 def fetch_merged_prs(api_since, api_until):
     """Paginate through GitHub's GraphQL search for merged PRs across the whole org."""
     prs = []
     after = None
     query_str = f"org:{ORG} is:pr is:merged merged:{api_since}..{api_until}"
-    while True:
+    for _ in range(MAX_PAGES):
         cmd = ["gh", "api", "graphql", "-f", f"query={PR_SEARCH_QUERY}", "-f", f"q={query_str}"]
         if after:
             cmd += ["-f", f"after={after}"]
@@ -80,6 +87,8 @@ def fetch_merged_prs(api_since, api_until):
             after = page_info.get("endCursor")
         else:
             break
+    else:
+        print(f"Warning: hit MAX_PAGES ({MAX_PAGES}) pagination cap; results may be incomplete", file=sys.stderr)
     return prs
 
 
@@ -120,7 +129,7 @@ def render_markdown(data):
     end_dt = datetime.strptime(end, "%Y-%m-%d")
 
     lines = []
-    lines.append(f"### PRs Merged: {start} - {end}")
+    lines.append("### PRs Merged")
     lines.append("")
     lines.append("| Day       | Total | By Repo |")
     lines.append("|-----------|-------|---------|")

@@ -17,6 +17,10 @@ scoped to one person):
 1. Merged PRs per day, with a per-repo breakdown (`scripts/gather_pr_merges.py`).
 2. Linear comment volume per ticket and per day (`scripts/gather_linear_comments.py`).
 
+> **Performance note**: This skill just runs two Python scripts and prints their output — no
+> reasoning needed. When invoking it non-interactively from another skill, prefer launching via
+> the `Agent` tool with `model: "claude-haiku-4-5-20251001"` to save tokens.
+
 ## Step 1: Compute dates
 
 If the user provided a `date-range` argument, parse start and end dates from it. Otherwise
@@ -65,9 +69,14 @@ python3 "<skill-directory>/scripts/gather_linear_comments.py" \
 
 ## Step 4: Present the combined report
 
-Show both scripts' output together as one report, in this order: PRs Merged, Linear Comments by
-Day, Linear Comments by Ticket. If the Linear section was skipped, note why at the top of the
-report rather than silently omitting it.
+Emit a top-level header with the date range, then both scripts' output together as one report:
+
+```
+## Team Activity: $START_DATE - $END_DATE
+```
+
+followed by, in this order: PRs Merged, Linear Comments by Day, Linear Comments by Ticket. If the
+Linear section was skipped, note why at the top of the report rather than silently omitting it.
 
 ### Optional flags (for other skills)
 

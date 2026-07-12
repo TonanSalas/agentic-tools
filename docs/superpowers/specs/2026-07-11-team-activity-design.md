@@ -61,17 +61,34 @@ single user's event stream doesn't work.
 
 ### Approach
 
-Use a single paginated GitHub search call across the whole org, instead of enumerating repos and
-querying each one individually:
+Use a single paginated GitHub GraphQL search across the whole org, instead of enumerating repos
+and querying each one individually. `gh search prs`'s `--json` output was tried first but does
+not expose `mergedAt` (only day-granularity `--merged-at` filtering, which would force UTC-day
+bucketing instead of local-tz). `gh api graphql` with a `search(type: ISSUE)` query does return a
+full `mergedAt` timestamp, confirmed live against the real org:
 
 ```
-gh search prs --owner dragonflyic "merged:<start>..<end>" \
-  --json repository,number,title,mergedAt,author,url --limit 1000
+gh api graphql -f query='
+  query($q: String!, $after: String) {
+    search(query: $q, type: ISSUE, first: 50, after: $after) {
+      issueCount
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        ... on PullRequest {
+          number
+          title
+          mergedAt
+          repository { name }
+        }
+      }
+    }
+  }' -f q='org:dragonflyic is:pr is:merged merged:<start>..<end>'
 ```
 
-This returns every merged PR in the org for the date range in one call (paginated by `gh`
-itself), which is both simpler and cheaper than the repo-by-repo enumeration
-`gather_activity.py` does for personal activity.
+Paginate with `after: <endCursor>` while `hasNextPage` is true. This returns every merged PR in
+the org for the date range with exact merge timestamps, in a small number of calls (one per page
+of 50) — still far cheaper than the repo-by-repo enumeration `gather_activity.py` does for
+personal activity.
 
 ### Processing
 

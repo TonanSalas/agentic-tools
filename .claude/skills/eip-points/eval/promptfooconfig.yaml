@@ -1,0 +1,31 @@
+description: EIP Points activity classification (free text -> Category/Type)
+
+prompts:
+  - file://prompt.txt
+
+providers:
+  - id: 'exec: node claude.js'
+    config:
+      model: sonnet
+
+defaultTest:
+  vars:
+    rules: file://../references/classification.md
+  assert:
+    - type: is-json
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        const vars = context.vars;
+        if (vars.expectedExcluded) {
+          return parsed.excluded === true;
+        }
+        if (parsed.category !== vars.expectedCategory) {
+          return false;
+        }
+        if (vars.expectedType && parsed.type !== vars.expectedType) {
+          return false;
+        }
+        return true;
+
+tests: file://tests.yaml

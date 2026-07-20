@@ -1,0 +1,60 @@
+# Hand-written coverage of the documented classification rules in
+# ../references/classification.md. Add a case here whenever a new
+# recurring meeting format or organizer mapping is added there.
+
+- description: "Known Meeting-Type Mappings"
+  vars:
+    description: "TrustPod session this week, discussed trust-building exercises"
+    expectedCategory: "Education/Coaching"
+    expectedType: "ImprovingU Group Discussion"
+
+- description: "Known Meeting-Type Mappings — AIR MX Remote"
+  vars:
+    description: "Attended AIR MX Remote this morning"
+    expectedCategory: "Networking"
+    expectedType: "Meeting"
+
+- description: "Known Meeting-Type Mappings — AIR for non developers"
+  vars:
+    description: "Joined the AIR for non developers session"
+    expectedCategory: "Networking"
+    expectedType: "Meeting"
+
+- description: "Known Meeting-Type Mappings — Animation Club"
+  vars:
+    description: "Went to Animation Club this week"
+    expectedCategory: "Networking"
+    expectedType: "Meeting"
+
+- description: "Known Meeting-Type Mappings — daily standup excluded"
+  vars:
+    description: "Daily Dragonfly standup this morning"
+    expectedExcluded: true
+
+- description: "Organizer-Based Classification — Armando"
+  vars:
+    description: "Attended Armando's talk on AFORE"
+    expectedCategory: "Networking"
+    expectedType: "Meeting"
+
+- description: "Organizer-Based Classification — Sandy (type not fixed, category only)"
+  vars:
+    description: "Attended Sandy's Come Together session on Diversidad e Inclusión"
+    expectedCategory: "Come Together"
+
+- description: "Organizer-Based Classification — Bety (type not fixed, category only)"
+  vars:
+    description: "Attended Bety's session on Inteligencia Emocional en el Trabajo"
+    expectedCategory: "Come Together"
+
+- description: "Generic fallback — no known mapping or organizer"
+  vars:
+    description: "Grabbed coffee with a colleague from another team to catch up"
+    expectedCategory: "Networking"
+    expectedType: "Meeting"
+
+- description: "Generic fallback — ambiguous informal help"
+  vars:
+    description: "Helped a new hire get their laptop set up on their first day"
+    expectedCategory: "Networking"
+    expectedType: "Meeting"

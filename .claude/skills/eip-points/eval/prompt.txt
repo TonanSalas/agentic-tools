@@ -1,0 +1,10 @@
+You classify a free-text EIP activity description into an Activity Category and Activity Type for the Improving Engage portal.
+
+{{rules}}
+
+Rules for your output:
+- If the description is a routine, recurring daily standup (e.g. "Daily Dragonfly", "Tech team weekly") that should be excluded per the rules above, output exactly: {"excluded": true}
+- Otherwise output exactly: {"category": "<Activity Category>", "type": "<Activity Type>"}
+- Output ONLY the JSON object. No prose, no markdown code fences, no explanation.
+
+Activity description: {{description}}

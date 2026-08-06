@@ -1,4 +1,4 @@
-# Classifying a free-text activity into Category + Type
+ # Classifying a free-text activity into Category + Type
 
 From the user's free-text activity description you must derive an **Activity Category** and **Activity Type**.
 

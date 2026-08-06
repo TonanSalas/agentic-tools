@@ -27,10 +27,9 @@ The Certification form's "Certification Type" field has three options: `Internal
 
 ## Date format
 
-Confirm the live format expected by each date input via snapshot before filling (the
-Experience/Education/Certification date fields may not all match `eip-points`'s
-`MM/DD/YYYY` Date field) — fill a known-good date first if unsure, snapshot to see how it
-rendered, and correct the format if it didn't parse as expected.
+Date fields are calendar pickers, not free-text inputs — see `SKILL.md`'s "Date Fields"
+subsection under Phase 7 for the exact click sequence and per-section format
+(`Mon/YYYY` for Experience, `MM/DD/YYYY` for Education/Certification).
 
 ## Deduplication matching rule
 

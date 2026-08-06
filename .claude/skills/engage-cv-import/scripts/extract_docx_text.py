@@ -17,6 +17,24 @@ from pathlib import Path
 WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
+def _run_aware_text(element):
+    """Extract text from all descendants of `element` in document order, run-aware:
+    `w:t` contributes its text, `w:tab` contributes a space, and `w:br` contributes a
+    newline. Without this, a tab or line break between two `w:t` runs (siblings inside a
+    `w:r`) contributes nothing, silently concatenating words that were visually separated
+    (e.g. "Backend Engineer<TAB>Jan 2022" -> "Backend EngineerJan 2022")."""
+    parts = []
+    for node in element.iter():
+        tag = node.tag
+        if tag == f"{WORD_NS}t":
+            parts.append(node.text or "")
+        elif tag == f"{WORD_NS}tab":
+            parts.append(" ")
+        elif tag == f"{WORD_NS}br":
+            parts.append("\n")
+    return "".join(parts)
+
+
 def extract_text(docx_path):
     """Return the docx's visible text: one line per paragraph, table rows as 'cell | cell'."""
     with zipfile.ZipFile(docx_path) as archive:
@@ -29,16 +47,14 @@ def extract_text(docx_path):
     for element in body:
         tag = element.tag
         if tag == f"{WORD_NS}p":
-            text = "".join(node.text or "" for node in element.iter(f"{WORD_NS}t")).strip()
+            text = _run_aware_text(element).strip()
             if text:
                 lines.append(text)
         elif tag == f"{WORD_NS}tbl":
             for row in element.iter(f"{WORD_NS}tr"):
                 cells = []
                 for cell in row.iter(f"{WORD_NS}tc"):
-                    cell_text = "".join(
-                        node.text or "" for node in cell.iter(f"{WORD_NS}t")
-                    ).strip()
+                    cell_text = _run_aware_text(cell).strip()
                     if cell_text:
                         cells.append(cell_text)
                 if cells:

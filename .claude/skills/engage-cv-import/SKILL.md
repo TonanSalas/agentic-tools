@@ -121,10 +121,10 @@ Present one combined table covering every extracted entry, grouped by section:
 | Nuevo | State University | B.S. Computer Science | 2018 - 2022 |
 
 ### Certification & Exam
-| Status | Name | Organization | Exam Date | Type |
-|--------|------|---------------|-----------|------|
-| Nuevo | AWS Certified Solutions Architect | Amazon Web Services | 03/2024 | Professional |
-| Falta un dato | Scrum Master | Scrum Alliance | ⚠ no exam date in CV | — |
+| Status | Name | Organization | Exam Date | Expiration | Type |
+|--------|------|---------------|-----------|------------|------|
+| Nuevo | AWS Certified Solutions Architect | Amazon Web Services | 03/2024 | ⚠ not stated in CV | Professional |
+| Falta un dato | Scrum Master | Scrum Alliance | ⚠ no exam date in CV | — | — |
 ```
 
 For any entry tagged "Falta un dato", ask the user to supply the missing value or say to drop
@@ -181,7 +181,7 @@ On the same `/app/main/profile/education?userId=<id>` page, click "+ Add" under
 | Certification Name | extracted | required |
 | Certification Organization | extracted | required |
 | Exam Date | extracted | required — already confirmed present in Phase 6; not a free-text field, see Date Fields below |
-| Expiration Date / No Expiration | extracted | **one of the two is required** — the form blocks Save with an "Expiration date or No Expiration required" dialog if both are left empty. Default to checking "No Expiration" when the CV doesn't state an expiration date; never guess a date. |
+| Expiration Date / No Expiration | extracted | **one of the two is required** — the form blocks Save with an "Expiration date or No Expiration required" dialog if both are left empty. When the CV doesn't state an expiration date, flag it in the Phase 6 preview like a missing Exam Date and ask the user whether to mark the certification as non-expiring or supply a date — never check "No Expiration" without the user seeing that choice first. Only fill this field per the user's Phase 6 answer. |
 | Certification Type | `references/parsing.md`'s Certification Type heuristic — use `select` on the combobox (option text, e.g. "Professional") | required |
 | Certification Number | extracted | optional |
 | Verification URL | extracted | optional |
@@ -194,6 +194,10 @@ continuing.
 None of these are free-text inputs — `fill` produces "Invalid date" or a silently wrong value.
 Clicking the field opens a calendar popup instead:
 
+0. **If the CV's End Date is "Present" (or otherwise indicates the role/credential is
+   ongoing)**, leave the End Date field empty — do not open its calendar picker at all. There
+   is no date to pick; clicking through the picker anyway risks selecting a real date and
+   incorrectly ending an ongoing entry.
 1. **Click the date field.** A `dialog "calendar"` appears, defaulting to the current month
    (Experience dates) or current day (Education/Certification dates).
 2. **Click the year (or "Mon YYYY"/header) button** at the top of the calendar to jump straight
@@ -245,8 +249,10 @@ applied.
   "N more" link before concluding a save failed.
 - **"Expiration date or No Expiration required" dialog blocks Save**: a Certification entry
   needs either an Expiration Date or the "No Expiration" checkbox — click "Ok" to dismiss the
-  dialog, check "No Expiration" (unless the CV states an actual expiration date), then Save
-  again.
+  dialog, then fill whichever the user chose in Phase 6 (an Expiration Date, or "No
+  Expiration" if the user confirmed the credential doesn't expire), then Save again. This
+  dialog should only ever be hit for a value the user already picked in Phase 6 — never decide
+  which one to check here.
 - **"element was detached from the DOM, retrying" on a date-picker click**: the ref went stale
   because a parent calendar view (month/year) re-rendered — re-snapshot and retry the same
   click once with the fresh ref before treating it as a real failure. See Phase 7's Date

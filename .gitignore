@@ -5,3 +5,6 @@
 .claude/skills/team-activity/cache/
 .env
 .superpowers/
+__pycache__/
+.pytest_cache/
+.claude/logs/

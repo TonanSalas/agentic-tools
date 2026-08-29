@@ -493,10 +493,30 @@ def render_markdown(data):
     return "\n".join(lines)
 
 
+def resolve_range(keyword: str) -> tuple[str, str]:
+    """Resolve 'this-week' / 'last-week' to (start, end) dates, deterministically.
+
+    A week is Monday through today (this-week) or Monday through Sunday of
+    the prior week (last-week). Computed in Python so it doesn't depend on
+    the caller doing date arithmetic or shelling out to `date`.
+    """
+    today = datetime.now().date()
+    monday_this_week = today - timedelta(days=today.weekday())
+    if keyword == "this-week":
+        return monday_this_week.isoformat(), today.isoformat()
+    if keyword == "last-week":
+        monday_last_week = monday_this_week - timedelta(days=7)
+        sunday_last_week = monday_this_week - timedelta(days=1)
+        return monday_last_week.isoformat(), sunday_last_week.isoformat()
+    raise ValueError(f"Unknown range keyword: {keyword!r}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Gather GitHub activity")
-    parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
-    parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
+    parser.add_argument("--range", choices=["this-week", "last-week"],
+                        help="Resolve dates deterministically instead of passing them explicitly")
+    parser.add_argument("--start-date", help="Start date YYYY-MM-DD (ignored if --range is set)")
+    parser.add_argument("--end-date", help="End date YYYY-MM-DD (ignored if --range is set)")
     parser.add_argument("--json", action="store_true",
                         help="Emit structured JSON (with ticket state) instead of markdown")
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR),
@@ -505,8 +525,12 @@ def main():
                         help="Force a fresh fetch and overwrite any cached result")
     args = parser.parse_args()
 
-    start = args.start_date
-    end = args.end_date
+    if args.range:
+        start, end = resolve_range(args.range)
+    elif args.start_date and args.end_date:
+        start, end = args.start_date, args.end_date
+    else:
+        parser.error("either --range or both --start-date/--end-date are required")
     cache_dir = Path(args.cache_dir)
     cache_path = cache_path_for(cache_dir, start, end)
 

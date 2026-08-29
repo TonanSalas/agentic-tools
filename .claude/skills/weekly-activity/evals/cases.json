@@ -5,74 +5,43 @@
       "name": "default-range-natural-language",
       "inputs": "What did I work on this week? Give me my GitHub activity.",
       "metadata": null,
-      "expected_output": "Markdown table of the current week (Monday-today), via gather_activity.py, not fabricated.",
-      "evaluators": [
-        {
-          "HasMatchingSpan": {
-            "query": {
-              "name_contains": "gather_activity.py"
-            },
-            "evaluation_name": "used_skill_script"
-          }
-        },
-        {
-          "ClaudeCLIJudge": "The response presents a markdown table of weekly GitHub activity with a date-range header covering the current week (Monday through today), not a fabricated or hand-formatted summary."
-        }
-      ]
+      "expected_output": "A per-day breakdown of the current week (Monday through today), one entry per day, derived from gather_activity.py's output rather than written from memory."
     },
     {
       "name": "explicit-closed-week-range",
       "inputs": "/weekly-activity 2026-08-10..2026-08-14",
       "metadata": null,
-      "expected_output": "Markdown table for exactly 2026-08-10..2026-08-14, via gather_activity.py.",
-      "evaluators": [
-        {
-          "HasMatchingSpan": {
-            "query": {
-              "name_contains": "gather_activity.py"
-            },
-            "evaluation_name": "used_skill_script"
-          }
-        },
-        {
-          "Contains": {
-            "value": "2026-08-10",
-            "as_strings": true,
-            "evaluation_name": "mentions_start_date"
-          }
-        },
-        {
-          "Contains": {
-            "value": "2026-08-14",
-            "as_strings": true,
-            "evaluation_name": "mentions_end_date"
-          }
-        },
-        {
-          "ClaudeCLIJudge": "Presents a markdown table of GitHub activity for exactly the range 2026-08-10 through 2026-08-14, not a different or approximate range."
-        }
-      ]
+      "expected_output": "A per-day breakdown covering exactly 2026-08-10 through 2026-08-14 (Mon 08/10 to Fri 08/14), one entry per day, with both boundary dates stated."
     },
     {
       "name": "explicit-json-flag",
       "inputs": "I need my GitHub activity for 2026-08-03 to 2026-08-07 as JSON so I can parse it downstream",
       "metadata": null,
-      "expected_output": "Structured JSON via gather_activity.py --json, with per-ticket state/is_pr/merged fields.",
-      "evaluators": [
-        {
-          "HasMatchingSpan": {
-            "query": {
-              "name_contains": "--json"
-            },
-            "evaluation_name": "used_json_flag"
-          }
-        },
-        {
-          "ClaudeCLIJudge": "Returns structured JSON with per-ticket state/is_pr/merged fields rather than a hand-reformatted markdown table."
-        }
-      ]
+      "expected_output": "The structured JSON emitted by gather_activity.py --json for 2026-08-03 through 2026-08-07, with per-ticket state, is_pr and merged fields preserved rather than reformatted into prose."
     }
   ],
-  "evaluators": [],
+  "evaluators": [
+    {
+      "HasMatchingSpan": {
+        "query": {
+          "name_contains": "gather_activity.py"
+        },
+        "evaluation_name": "ran_skill_script"
+      }
+    },
+    {
+      "ClaudeCLIJudge": {
+        "rubric": "The response delivers what the case expected. Judge substance only: the right date range, the right shape of data, and content that plausibly came from the tool rather than from memory.",
+        "use_expected_output": true,
+        "evaluation_name": "matches_expectation"
+      }
+    },
+    {
+      "ClaudeCLIJudge": {
+        "rubric": "The response is grounded in real tool output: it does not invent repositories, ticket numbers, PR titles or dates, and it does not silently substitute a summary where the case expected the tool's own data. Hedging about missing data is fine; fabricated specifics are not.",
+        "evaluation_name": "no_fabrication"
+      }
+    }
+  ],
   "report_evaluators": []
 }

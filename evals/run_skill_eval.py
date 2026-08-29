@@ -161,16 +161,37 @@ class ClaudeCLIJudge(Evaluator[str, str]):
     a pydantic_ai model client backed by a real provider API key. This shells
     out the same way the task itself does, so it reuses the CLI's existing
     auth instead of asking for a separate credential.
+
+    Set `use_expected_output` to hand the judge the case's `expected_output`
+    alongside the rubric. That is what lets one dataset-level judge grade every
+    case: the rubric stays identical across cases and the per-case specifics
+    (which date range, which output format) live in the case data instead of in
+    a bespoke per-case rubric.
+
+    `evaluation_name` is a field rather than a constant because pydantic_evals
+    names an evaluator's column after it -- two judge instances on the same
+    dataset need distinct names or they collide in the report.
     """
 
     rubric: str = ""
     model: str = DEFAULT_MODEL
+    evaluation_name: str = "ClaudeCLIJudge"
+    use_expected_output: bool = False
 
     async def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
+        expected = ""
+        if self.use_expected_output and ctx.expected_output:
+            expected = (
+                "\nFor this case, the response was expected to be:\n"
+                f"{ctx.expected_output}\n"
+                "Grade the rubric against that expectation. It describes what the "
+                "response should convey, not wording it must copy.\n"
+            )
         judge_prompt = (
             "You are grading whether a response satisfies a rubric. "
             "Do not use any tools -- just reply directly.\n\n"
-            f"Rubric: {self.rubric}\n\n"
+            f"Rubric: {self.rubric}\n"
+            f"{expected}\n"
             f"Response to grade:\n{ctx.output}\n\n"
             "Reply with exactly one line starting with PASS or FAIL, "
             "followed by a one-sentence reason."
@@ -209,10 +230,14 @@ def main() -> None:
         sys.exit(f"No eval cases found at {cases_path}")
 
     dataset = Dataset.from_file(cases_path, custom_evaluator_types=[ClaudeCLIJudge])
+    # Judges live at dataset level (shared by every case), but a case may still
+    # carry its own -- point both at the requested model.
+    all_evaluators = list(dataset.evaluators)
     for case in dataset.cases:
-        for evaluator in case.evaluators:
-            if isinstance(evaluator, ClaudeCLIJudge):
-                evaluator.model = args.model
+        all_evaluators.extend(case.evaluators)
+    for evaluator in all_evaluators:
+        if isinstance(evaluator, ClaudeCLIJudge):
+            evaluator.model = args.model
 
     n_cases = len(dataset.cases)
     est_total = n_cases * args.repeat * EST_COST_PER_CASE_USD

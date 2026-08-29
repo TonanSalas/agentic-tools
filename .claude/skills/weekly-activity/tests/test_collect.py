@@ -195,3 +195,75 @@ def test_pr_created_before_the_range_is_dropped_even_if_merged_inside_it(ga, onl
                      "createdAt": "2026-04-05T12:00:00Z",
                      "mergedAt": "2026-04-08T12:00:00Z"})
     assert days == {}
+
+
+# --- individual collectors --------------------------------------------------
+# These reach one source at a time -- impossible before the split, when every
+# edge case had to be driven through the whole 143-line gather.
+
+def window(ga, repo=REPO):
+    return ga.collect.Window(repo, START, END, API_SINCE, API_UNTIL)
+
+
+def test_collect_commits_credits_only_refs_from_in_range_commits(ga, monkeypatch):
+    monkeypatch.setattr(ga.gh, "gh_api", lambda *a, **k: [
+        {"commit": {"author": {"date": "2026-04-07T12:00:00Z"}, "message": "fix: thing (#11)"}},
+        {"commit": {"author": {"date": "2026-04-20T12:00:00Z"}, "message": "late (#99)"}},
+    ])
+    acc = ga.collect.new_accumulator()
+    ga.collect.collect_commits(window(ga), acc)
+    assert set(acc.keys()) == {"2026-04-07"}
+    assert (REPO, 11) in acc["2026-04-07"]
+
+
+def test_collect_authored_prs_returns_its_numbers_and_raw_prs(ga, monkeypatch):
+    pr = {"number": 42, "title": "feat: add widget", "createdAt": "2026-04-08T12:00:00Z",
+          "mergedAt": None, "body": "closes #7"}
+    monkeypatch.setattr(ga.gh, "gh_search", lambda *a, **k: [pr])
+    acc = ga.collect.new_accumulator()
+    numbers, prs = ga.collect.collect_authored_prs(window(ga), acc)
+    assert numbers == {42}
+    assert prs == [pr]
+    assert acc["2026-04-08"][(REPO, 42)]["title"] == "add widget"
+    assert "pr-ref" in acc["2026-04-08"][(REPO, 7)]["sources"]
+
+
+def test_collect_issue_comments_skips_other_users(ga, monkeypatch):
+    monkeypatch.setattr(ga.gh, "gh_api", lambda *a, **k: [
+        {"user": {"login": ga.config.GH_USERNAME}, "created_at": "2026-04-07T12:00:00Z",
+         "issue_url": "https://api.github.com/repos/o/r/issues/5"},
+        {"user": {"login": "someone-else"}, "created_at": "2026-04-07T12:00:00Z",
+         "issue_url": "https://api.github.com/repos/o/r/issues/6"},
+    ])
+    acc = ga.collect.new_accumulator()
+    ga.collect.collect_issue_comments(window(ga), acc)
+    assert set(acc["2026-04-07"].keys()) == {(REPO, 5)}
+
+
+def test_collect_review_comments_returns_the_pr_numbers(ga, monkeypatch):
+    monkeypatch.setattr(ga.gh, "gh_api", lambda *a, **k: [
+        {"user": {"login": ga.config.GH_USERNAME}, "created_at": "2026-04-09T12:00:00Z",
+         "pull_request_url": "https://api.github.com/repos/o/r/pulls/88"},
+    ])
+    acc = ga.collect.new_accumulator()
+    assert ga.collect.collect_review_comments(window(ga), acc) == {88}
+    assert "review-comment" in acc["2026-04-09"][(REPO, 88)]["sources"]
+
+
+def test_collect_authored_issues_strips_the_title_prefix(ga, monkeypatch):
+    monkeypatch.setattr(ga.gh, "gh_search", lambda *a, **k: [
+        {"number": 3, "title": "chore: tidy up", "createdAt": "2026-04-06T12:00:00Z"},
+    ])
+    acc = ga.collect.new_accumulator()
+    ga.collect.collect_authored_issues(window(ga), acc)
+    assert acc["2026-04-06"][(REPO, 3)]["title"] == "tidy up"
+
+
+def test_backfill_titles_leaves_titles_a_collector_already_set(ga):
+    acc = ga.collect.new_accumulator()
+    acc["2026-04-06"][(REPO, 1)] = {"title": "kept", "sources": {"authored-pr"}}
+    acc["2026-04-06"][(REPO, 2)] = {"title": "", "sources": {"commits"}}
+    ga.collect.backfill_titles(acc, {(REPO, 1): {"title": "ignored"},
+                                     (REPO, 2): {"title": "filled in"}})
+    assert acc["2026-04-06"][(REPO, 1)]["title"] == "kept"
+    assert acc["2026-04-06"][(REPO, 2)]["title"] == "filled in"

@@ -20,7 +20,7 @@ def fake_gather(ga, monkeypatch):
                 "start": start, "end": end, "repos": ["alpha"],
                 "days": {}, "tickets": []}
 
-    monkeypatch.setattr(ga, "gather_all", _gather)
+    monkeypatch.setattr(ga.assemble, "gather_all", _gather)
     return calls
 
 
@@ -29,9 +29,9 @@ def run_main(ga, monkeypatch, tmp_path):
     def _run(*extra):
         argv = ["gather_activity.py", "--start-date", START, "--end-date", END,
                 "--cache-dir", str(tmp_path), *extra]
-        monkeypatch.setattr(ga.sys, "argv", argv)
-        ga.main()
-        return ga.cache_path_for(tmp_path, START, END)
+        monkeypatch.setattr(ga.cli.sys, "argv", argv)
+        ga.cli.main()
+        return ga.cache.cache_path_for(tmp_path, START, END)
     return _run
 
 
@@ -81,17 +81,17 @@ def test_main_refetches_when_an_open_week_cache_has_expired(ga, monkeypatch, tmp
     future_start, future_end = "2999-01-04", "2999-01-08"
     argv = ["gather_activity.py", "--start-date", future_start, "--end-date", future_end,
             "--cache-dir", str(tmp_path), "--json"]
-    monkeypatch.setattr(ga.sys, "argv", argv)
-    ga.main()
-    cache = ga.cache_path_for(tmp_path, future_start, future_end)
+    monkeypatch.setattr(ga.cli.sys, "argv", argv)
+    ga.cli.main()
+    cache = ga.cache.cache_path_for(tmp_path, future_start, future_end)
     fake_gather.clear()
 
-    ga.main()                       # still inside the TTL: served from cache
+    ga.cli.main()                       # still inside the TTL: served from cache
     assert fake_gather == []
 
-    old = time.time() - (ga.CACHE_TTL_SECONDS + 60)
+    old = time.time() - (ga.config.CACHE_TTL_SECONDS + 60)
     os.utime(cache, (old, old))
-    ga.main()                       # past the TTL: refetched
+    ga.cli.main()                       # past the TTL: refetched
     capsys.readouterr()
     assert fake_gather == [(future_start, future_end)]
 
@@ -109,22 +109,22 @@ def test_main_prints_json_when_asked(ga, run_main, fake_gather, capsys):
 
 def test_main_creates_a_missing_cache_directory(ga, monkeypatch, tmp_path, fake_gather, capsys):
     nested = tmp_path / "does" / "not" / "exist"
-    monkeypatch.setattr(ga.sys, "argv", [
+    monkeypatch.setattr(ga.cli.sys, "argv", [
         "gather_activity.py", "--start-date", START, "--end-date", END,
         "--cache-dir", str(nested), "--json"])
-    ga.main()
+    ga.cli.main()
     capsys.readouterr()
-    assert ga.cache_path_for(nested, START, END).exists()
+    assert ga.cache.cache_path_for(nested, START, END).exists()
 
 
 def test_main_still_prints_when_the_cache_cannot_be_written(ga, monkeypatch, tmp_path,
                                                             fake_gather, capsys):
-    monkeypatch.setattr(ga.sys, "argv", [
+    monkeypatch.setattr(ga.cli.sys, "argv", [
         "gather_activity.py", "--start-date", START, "--end-date", END,
         "--cache-dir", str(tmp_path), "--json"])
-    monkeypatch.setattr(ga.Path, "write_text",
+    monkeypatch.setattr(ga.cli.Path, "write_text",
                         lambda self, *a, **k: (_ for _ in ()).throw(OSError("read-only")))
-    ga.main()
+    ga.cli.main()
     out = capsys.readouterr()
     assert json.loads(out.out)["repos"] == ["alpha"]
     assert "failed to write cache" in out.err
@@ -135,6 +135,6 @@ def test_main_still_prints_when_the_cache_cannot_be_written(ga, monkeypatch, tmp
     ["--start-date", START],
 ])
 def test_main_requires_both_dates(ga, monkeypatch, missing):
-    monkeypatch.setattr(ga.sys, "argv", ["gather_activity.py", *missing])
+    monkeypatch.setattr(ga.cli.sys, "argv", ["gather_activity.py", *missing])
     with pytest.raises(SystemExit):
-        ga.main()
+        ga.cli.main()

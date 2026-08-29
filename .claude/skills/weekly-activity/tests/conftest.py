@@ -1,26 +1,33 @@
-"""Load gather_activity.py (a script, not a package) as an importable module."""
+"""Test fixtures for the `activity` package.
 
-import importlib.util
+The package lives under `scripts/`, which isn't importable by default, so
+that directory goes on sys.path once here. No importlib loading is needed
+any more -- `activity` is a real package.
+"""
+
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "gather_activity.py"
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
-
-def _load():
-    spec = importlib.util.spec_from_file_location("gather_activity", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["gather_activity"] = module
-    spec.loader.exec_module(module)
-    return module
+import activity  # noqa: E402
 
 
 @pytest.fixture(scope="session")
 def ga():
-    return _load()
+    """The package namespace.
+
+    Kept so tests can reach every module through one handle (`ga.gh`,
+    `ga.collect`, ...). Patch on the *owning* module -- e.g.
+    `monkeypatch.setattr(ga.gh, "gh_api", fake)` -- so call sites in other
+    modules, which reach through the module object, see the fake.
+    """
+    return activity
 
 
 @pytest.fixture

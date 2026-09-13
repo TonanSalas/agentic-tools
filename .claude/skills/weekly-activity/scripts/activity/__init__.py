@@ -5,10 +5,10 @@ tests can reach them as `activity.gh`, `activity.collect`, and so on.
 """
 
 from . import (
-    assemble, cache, cli, collect, config, dates, discovery, gh, parsing, render,
+    assemble, cache, cli, collect, config, dates, discovery, gh, parsing,
 )
 
 __all__ = [
     "assemble", "cache", "cli", "collect", "config",
-    "dates", "discovery", "gh", "parsing", "render",
+    "dates", "discovery", "gh", "parsing",
 ]

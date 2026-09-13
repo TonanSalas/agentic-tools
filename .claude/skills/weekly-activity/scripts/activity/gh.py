@@ -49,35 +49,51 @@ def gh_search(repo, resource, query_parts):
         return []
 
 
+def _unresolved(number, resolution):
+    """Placeholder metadata for a reference we could not turn into a ticket.
+
+    `resolution` is the reason, and callers act on it: "missing" means GitHub
+    answered that no such item exists, so the reference was never a ticket and
+    can be dropped. "unavailable" means we never got an answer -- rate limit,
+    network, auth -- where the item may well be real, so dropping it would
+    silently lose work.
+    """
+    return {
+        "title": f"(unknown #{number})",
+        "state": "unknown",
+        "state_reason": None,
+        "is_pr": False,
+        "merged": None,
+        "resolution": resolution,
+    }
+
+
+def _looks_like_not_found(stderr):
+    return "404" in stderr or "not found" in stderr.lower()
+
+
 def fetch_item_meta(repo, number):
     """Fetch issue/PR metadata (title, state, state_reason, is_pr, merged) in one call.
 
     The /issues/{n} endpoint covers both issues and PRs; for PRs it includes a
-    `pull_request` field with `merged_at`. Returns a dict with safe defaults
-    if the call fails (e.g. ticket from another repo).
+    `pull_request` field with `merged_at`. On failure returns a placeholder
+    carrying a `resolution` of "missing" or "unavailable" -- see `_unresolved`.
     """
     result = subprocess.run(
         ["gh", "api", f"repos/{repo}/issues/{number}"],
         capture_output=True, text=True
     )
-    if result.returncode != 0 or not result.stdout.strip():
-        return {
-            "title": f"(unknown #{number})",
-            "state": "unknown",
-            "state_reason": None,
-            "is_pr": False,
-            "merged": None,
-        }
+    if result.returncode != 0:
+        return _unresolved(
+            number,
+            "missing" if _looks_like_not_found(result.stderr or "") else "unavailable",
+        )
+    if not result.stdout.strip():
+        return _unresolved(number, "unavailable")
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return {
-            "title": f"(unknown #{number})",
-            "state": "unknown",
-            "state_reason": None,
-            "is_pr": False,
-            "merged": None,
-        }
+        return _unresolved(number, "unavailable")
     pr_info = data.get("pull_request") or {}
     is_pr = bool(pr_info)
     merged = bool(pr_info.get("merged_at")) if is_pr else None
@@ -87,6 +103,7 @@ def fetch_item_meta(repo, number):
         "state_reason": data.get("state_reason"),
         "is_pr": is_pr,
         "merged": merged,
+        "resolution": "ok",
     }
 
 

@@ -45,10 +45,23 @@ def gather_all(start, end):
 
         merged_meta.update(meta_by_key)
 
+    # References GitHub answered "no such item" for were never tickets -- a
+    # #ref scraped out of a PR body can be a quote id, an invoice number, any
+    # "#" followed by digits. Drop those. Keep the ones we merely failed to
+    # reach: unreachable is not the same as nonexistent, and dropping a real
+    # ticket because of a rate limit would lose work silently.
+    missing = {k for k, m in merged_meta.items() if m.get("resolution") == "missing"}
+    if missing:
+        print(f"Dropped {len(missing)} unresolvable reference(s): "
+              + ", ".join(f"{r.split('/')[-1]}#{n}" for r, n in sorted(missing)),
+              file=sys.stderr)
+
     # Build per-ticket dedup view: (repo, num) -> {meta, days, sources}
     tickets_index = {}
     for day, day_data in merged_activity.items():
         for (repo, num), info in day_data.items():
+            if (repo, num) in missing:
+                continue
             t = tickets_index.setdefault((repo, num), {
                 "days": set(),
                 "sources": set(),
@@ -77,6 +90,8 @@ def gather_all(start, end):
     for day, day_data in merged_activity.items():
         items = []
         for (repo, num), info in sorted(day_data.items()):
+            if (repo, num) in missing:
+                continue
             short = repo.split("/")[-1]
             base = ticket_lookup.get((short, num), {})
             items.append({

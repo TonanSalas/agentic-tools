@@ -112,6 +112,7 @@ def test_fetch_item_meta_reads_a_plain_issue(ga, run_spy):
         "state_reason": "completed",
         "is_pr": False,
         "merged": None,             # not applicable to issues
+        "resolution": "ok",
     }
 
 
@@ -151,9 +152,45 @@ def test_fetch_item_meta_falls_back_to_safe_defaults(ga, run_spy, stdout, return
         "state_reason": None,
         "is_pr": False,
         "merged": None,
+        # no 404 in stderr here, so the reason is "we never got an answer"
+        "resolution": "unavailable",
     }
 
 
 def test_fetch_item_title_returns_just_the_title(ga, run_spy):
     run_spy(stdout=json.dumps({"title": "Something broke", "state": "open"}))
     assert ga.gh.fetch_item_title("org/repo", 101) == "Something broke"
+
+
+# --- fetch_item_meta: why a lookup failed ----------------------------------
+#
+# A reference that 404s is not a ticket -- callers may drop it. A reference we
+# simply could not reach (rate limit, network, auth) might be perfectly real,
+# and dropping it would silently lose work. `resolution` separates the two.
+
+def test_fetch_item_meta_reports_ok_when_the_item_exists(ga, run_spy):
+    run_spy(stdout=json.dumps({"title": "real work", "state": "OPEN"}))
+    assert ga.gh.fetch_item_meta("o/r", 12)["resolution"] == "ok"
+
+
+def test_fetch_item_meta_reports_missing_on_404(ga, run_spy):
+    run_spy(stdout="", returncode=1, stderr="gh: Not Found (HTTP 404)")
+    meta = ga.gh.fetch_item_meta("o/r", 4970877)
+    assert meta["resolution"] == "missing"
+    assert meta["title"] == "(unknown #4970877)"
+
+
+@pytest.mark.parametrize("stderr", [
+    "HTTP 502 Bad Gateway",
+    "API rate limit exceeded",
+    "dial tcp: lookup api.github.com: no such host",
+    "gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN",
+])
+def test_fetch_item_meta_reports_unavailable_when_the_call_failed(ga, run_spy, stderr):
+    run_spy(stdout="", returncode=1, stderr=stderr)
+    assert ga.gh.fetch_item_meta("o/r", 12)["resolution"] == "unavailable"
+
+
+def test_fetch_item_meta_reports_unavailable_on_unparseable_output(ga, run_spy):
+    run_spy(stdout="{ not json")
+    assert ga.gh.fetch_item_meta("o/r", 12)["resolution"] == "unavailable"

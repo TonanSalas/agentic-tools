@@ -50,11 +50,11 @@ The section headers (*What I did this week* and *Goals for next week*) are in it
 
 ## Phase 1: Gather Activity (with ticket state)
 
-Call `gather_activity.py` directly with `--json` so each ticket comes back with its state already attached — no per-ticket `gh` calls needed downstream. This also hits the shared cache, so a same-week chain from `workday-timelogger` won't re-fetch.
+Call `gather_activity.py` directly — it always emits JSON with each ticket's state already attached, no per-ticket `gh` calls needed downstream. This also hits the shared cache, so a same-week chain from `workday-timelogger` won't re-fetch.
 
 ```bash
 python3 .claude/skills/weekly-activity/scripts/gather_activity.py \
-  --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD> --json
+  --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD>
 ```
 
 If `week` was provided, use that range. If not (or `week == "this"`), default to `$(date -v-Mon +%Y-%m-%d)` through `$(date +%Y-%m-%d)`.

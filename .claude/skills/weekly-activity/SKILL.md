@@ -5,11 +5,16 @@ description: Gather GitHub activity across all dragonflyic repos for a this week
 
 # Weekly Activity Report
 
-Gather the user's GitHub activity across all `dragonflyic` repos for a date range. The script auto-discovers which repos had activity using the Events API.
+## Task
 
-## Step 1: Run the Activity Script
+Run `gather_activity.py`, then write a day-by-day summary of what the user did during that period.
 
-Never compute dates yourself. Pick exactly one:
+## Context
+
+The script owns date resolution and always emits structured JSON (each ticket
+includes `state`, `state_reason`, `is_pr`, `merged`, `days`, `sources`) — it
+auto-discovers which `dragonflyic` repos had activity using the Events API.
+Never compute dates yourself. Pick exactly one form:
 
 ```bash
 python3 "<skill-directory>/scripts/gather_activity.py" --range this-week
@@ -17,18 +22,24 @@ python3 "<skill-directory>/scripts/gather_activity.py" --range this-week
 # or: --start-date "2026-04-01" --end-date "2026-04-03"
 ```
 
-### Optional flags (for other skills)
+## Output format
 
-- `--json` — emit structured JSON instead of markdown. Each ticket includes `state` (open/closed/unknown), `state_reason`, `is_pr`, `merged`, `days`, `sources`. Use this from `weekly-report` or any caller doing programmatic classification — avoids a per-ticket `gh` round-trip downstream.
-- `--no-cache` — force a fresh fetch even if cached.
-- `--cache-dir <path>` — override the default cache location.
+Reply with exactly this YAML and nothing else. One `days` entry per date in the
+range.
 
-### Caching
-
-The script caches results to `<skill>/cache/<start>_<end>.json` (gitignored). Cache rules:
-- **Closed week** (end-date is before today): cache used indefinitely.
-- **Current/future week**: cache used if < 1 hour old.
-
-## Step 2: Present the Output
-
-Create a daily breakdown summary fore each day.
+```yaml
+range:
+  start: 2026-08-10
+  end: 2026-08-14
+days:
+  - date: 2026-08-10
+    items:
+      - ref: insurance_portal#59
+        title: Serve real captured quote documents per line
+      - ref: agentic-org#1468
+        title: Move carrier capture kits to Google Drive
+    summary: One sentence on the shape of this day's work, drawn only from the items above.
+  - date: 2026-08-11
+    items: []
+    summary: Quiet day — no recorded activity.
+```

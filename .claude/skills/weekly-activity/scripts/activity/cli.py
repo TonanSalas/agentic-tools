@@ -1,11 +1,11 @@
-"""Command-line entry point: argument parsing, cache read/write, output selection."""
+"""Command-line entry point: argument parsing, cache read/write, JSON output."""
 
 import argparse
 import json
 import sys
 from pathlib import Path
 
-from . import assemble, cache, dates, render
+from . import assemble, cache, dates
 from .config import DEFAULT_CACHE_DIR
 
 
@@ -15,8 +15,6 @@ def main():
                         help="Resolve dates deterministically instead of passing them explicitly")
     parser.add_argument("--start-date", help="Start date YYYY-MM-DD (ignored if --range is set)")
     parser.add_argument("--end-date", help="End date YYYY-MM-DD (ignored if --range is set)")
-    parser.add_argument("--json", action="store_true",
-                        help="Emit structured JSON (with ticket state) instead of markdown")
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR),
                         help="Cache directory (default: <skill>/cache/)")
     parser.add_argument("--no-cache", action="store_true",
@@ -48,7 +46,4 @@ def main():
         except OSError as e:
             print(f"Warning: failed to write cache: {e}", file=sys.stderr)
 
-    if args.json:
-        print(json.dumps(data, indent=2))
-    else:
-        print(render.render_markdown(data))
+    print(json.dumps(data, indent=2))

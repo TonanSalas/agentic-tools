@@ -79,3 +79,55 @@ def test_per_day_items_inherit_missing_titles_from_the_ticket_index(ga, two_repo
     item = next(it for it in two_repo_data["days"]["2026-04-07"] if it["number"] == 55)
     assert item["title"] == "add widget"
     assert item["sources"] == ["commits"]   # per-day sources stay day-specific
+
+
+# --- unresolvable references ------------------------------------------------
+#
+# `collect_authored_prs` scrapes #refs out of free-form PR bodies, so a number
+# that is not a ticket at all can enter the accumulator -- a Chubb quote id
+# ("quote #4970877") did exactly that. A reference GitHub reports as missing is
+# dropped; one we merely failed to reach is kept, because dropping it would
+# silently lose real work.
+
+@pytest.fixture
+def data_with_unresolved_refs(ga, monkeypatch):
+    def canned(repo, start, end, api_since, api_until):
+        activity = {
+            "2026-04-06": {
+                (repo, 55): {"title": "add widget", "sources": {"authored-pr"}},
+                (repo, 4970877): {"title": "", "sources": {"pr-ref"}},
+                (repo, 777): {"title": "", "sources": {"pr-ref"}},
+            },
+        }
+        meta = {
+            (repo, 55): {"title": "add widget", "state": "closed", "state_reason": None,
+                         "is_pr": True, "merged": True, "resolution": "ok"},
+            (repo, 4970877): {"title": "(unknown #4970877)", "state": "unknown",
+                              "state_reason": None, "is_pr": False, "merged": None,
+                              "resolution": "missing"},
+            (repo, 777): {"title": "(unknown #777)", "state": "unknown",
+                          "state_reason": None, "is_pr": False, "merged": None,
+                          "resolution": "unavailable"},
+        }
+        return activity, set(), set(), set(), [], meta
+
+    monkeypatch.setattr(ga.discovery, "discover_repos", lambda *a: ["dragonflyic/alpha"])
+    monkeypatch.setattr(ga.collect, "gather_repo_activity", canned)
+    return ga.assemble.gather_all(START, END)
+
+
+def test_gather_all_drops_references_github_reports_as_missing(ga, data_with_unresolved_refs):
+    assert 4970877 not in {t["number"] for t in data_with_unresolved_refs["tickets"]}
+
+
+def test_gather_all_drops_missing_references_from_the_per_day_view_too(ga, data_with_unresolved_refs):
+    assert 4970877 not in {it["number"] for it in data_with_unresolved_refs["days"]["2026-04-06"]}
+
+
+def test_gather_all_keeps_references_it_merely_could_not_reach(ga, data_with_unresolved_refs):
+    # unreachable != nonexistent; dropping these would lose real work silently
+    assert 777 in {t["number"] for t in data_with_unresolved_refs["tickets"]}
+
+
+def test_gather_all_keeps_real_tickets_when_dropping_missing_ones(ga, data_with_unresolved_refs):
+    assert 55 in {t["number"] for t in data_with_unresolved_refs["tickets"]}

@@ -14,10 +14,10 @@
       "expected_output": "A per-day breakdown covering exactly 2026-08-10 through 2026-08-14 (Mon 08/10 to Fri 08/14), one entry per day, with both boundary dates stated."
     },
     {
-      "name": "explicit-json-flag",
-      "inputs": "I need my GitHub activity for 2026-08-03 to 2026-08-07 as JSON so I can parse it downstream",
+      "name": "yaml-output-contract",
+      "inputs": "What did I work on between 2026-08-03 and 2026-08-07?",
       "metadata": null,
-      "expected_output": "The structured JSON emitted by gather_activity.py --json for 2026-08-03 through 2026-08-07, with per-ticket state, is_pr and merged fields preserved rather than reformatted into prose."
+      "expected_output": "A YAML document with a top-level `range` (start/end) and one `days` entry per date in 2026-08-03..2026-08-07, each with `items` (ref + title, drawn from gather_activity.py's output) and a one-sentence `summary` grounded in those items — not free-form prose."
     }
   ],
   "evaluators": [

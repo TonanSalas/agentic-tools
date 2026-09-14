@@ -93,7 +93,8 @@ def trace_run(run_dir: Path) -> str:
     for r in recs:
         extra = ""
         if r["kind"] == "step":
-            extra = f" model={r.get('model')} in={r.get('input_tokens')} out={r.get('output_tokens')} cost=${float(r.get('cost_usd') or 0):.4f}"
+            extra = (f" model={r.get('model')} in={r.get('input_tokens')} cache_read={r.get('cache_read_tokens')} "
+                     f"cache_write={r.get('cache_creation_tokens')} out={r.get('output_tokens')} cost=${float(r.get('cost_usd') or 0):.4f}")
         elif r["kind"] == "guardrail":
             extra = f" reason={r.get('reason')!r}"
         elif r["kind"] == "punchout":

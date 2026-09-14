@@ -43,7 +43,7 @@ approval fails the run (`hook_p1` / `hook_p2` records).
 Outside a harness run the hook allows everything, so the interactive skills keep
 their existing chat-based confirmation and unrelated sessions are unaffected.
 
-Tests: `workflow/tests/test_hook.py` (10) and the live bypass test
+Tests: `workflow/tests/test_hook.py` (13) and the live bypass test
 `workflow/test_bypass.py`, whose output is `punch-out-evidence.md`.
 
 ## Failure ≠ punch-out

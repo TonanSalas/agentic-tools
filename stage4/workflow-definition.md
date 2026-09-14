@@ -18,9 +18,9 @@ Three validated Stage 3 skills wired into one end-to-end workflow, driven by
 | Skill | Deterministic core | Unit tests | Prompt eval (`evals/cases.json`, graded by `evals/run_skill_eval.py`) |
 |---|---|---|---|
 | `weekly-activity` | `scripts/gather_activity.py` (GitHub Events + issues/PRs, cached) | `tests/` (8 files) | 3 cases: populated week, natural-language window, empty future week. Deterministic graders `ScriptExecuted`, `DayCoverage`, `GroundedIdentifiers` + one rubric judge on the TEC report. |
-| `workday-timelogger` | `scripts/plan_entries.py` (hour split, ticket distribution, comment rules) | `tests/test_plan_entries.py` (12) | 3 cases (plan-only): split day with real activity, future-week placeholder, natural-language request. Graded by `ScriptExecuted`, `NoCommandContaining` (no browser), `PlanMatches` on the written plan file, one judge. Last run: 100%. |
+| `workday-timelogger` | `scripts/plan_entries.py` (hour split, ticket distribution, comment rules) | `tests/test_plan_entries.py` (13) | 3 cases (plan-only): split day with real activity, future-week placeholder, natural-language request. Graded by `ScriptExecuted`, `NoCommandContaining` (no browser), `PlanMatches` on the written plan file, one judge. Last run: 100%. |
 | `teams-messenger` | `scripts/to_teams_html.py` (markdown → Teams HTML, clipboard) | `tests/test_to_teams_html.py` (7) | 3 cases: dry-run rich message, live send to self-chat, unknown target. Graded by `ScriptExecuted`, `NoCommandContaining` (no Send on dry-run / unknown target), judge. Last run: 100%. |
-| `weekly-log` (the workflow itself) | `workflow/` package | `workflow/tests/` (35) | 3 cases: test dry-run skipping Workday, test dry-run with planning, refusal to forge the approval. Graded by `ScriptExecuted`, `NoCommandContaining`, `AuditOutcome` (reads the run's own `audit.jsonl`), judge. |
+| `weekly-log` (the workflow itself) | `workflow/` package | `workflow/tests/` (54) | 3 cases: test dry-run skipping Workday, test dry-run with planning, refusal to forge the approval. Graded by `ScriptExecuted`, `NoCommandContaining`, `AuditOutcome` (reads the run's own `audit.jsonl`), judge. |
 
 All three agents run without manual correction in the harness: each is invoked
 one phase at a time with an explicit input file and output file, and the
@@ -52,7 +52,7 @@ step prose except for `s1_activity`, whose whole reply *is* the YAML artifact
 | `--skip-teams` | stop after s2c |
 | `--dry-run` | s2b/g3/P1/s2c skipped (plan still built and checked); s3 runs with `--dry-run` (paste, verify, no Send) |
 | `--teams-target` ≠ self-chat | P2 punch-out before s3 |
-| `--test` | week = next Mon–Tue, `Mon 8, Tue 8`, self-chat, `mode: test` |
+| `--test` | week = next Mon–Tue, `Mon 8, Tue 8`, self-chat, `mode: test`; **never submits** the timesheet (a submitted week cannot be deleted), so P1/s2c are skipped and `cleanup_workday.py` removes the entered hours afterward |
 | punch-out, no TTY | run ends `awaiting_human`; `--resume <run_id>` continues after the sentinel is created, reusing every completed step's output |
 | punch-out, TTY | harness prompts `approve` / `reject`; `reject` ends the run `rejected_by_human` |
 

@@ -15,7 +15,7 @@ enter the hours into Workday, post the TEC status report to Teams. Built in the
 ## How to run it
 
 ```bash
-# unit tests for every deterministic part (177 tests)
+# unit tests for every deterministic part (187 tests)
 python3 -m pytest workflow .claude/skills/*/tests -q
 
 # prompt evals for each agent and for the workflow (real headless Claude turns)

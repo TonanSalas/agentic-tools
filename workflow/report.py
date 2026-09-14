@@ -6,8 +6,9 @@
     python3 workflow/report.py --run <run_id>       # trace one run's records
 
 The Stage 4 number is the END-TO-END rate: runs whose `run` record says
-`success`, divided by runs that reached a decision (awaiting_human runs are
-still open and are excluded from the denominator).
+`success`, divided by runs that ended `success` or `failed`. Runs still
+`awaiting_human`, and runs a human `rejected` at a punch-out, are listed but
+not in the denominator: neither is a workflow failure.
 """
 from __future__ import annotations
 
@@ -42,9 +43,9 @@ def load_runs(runs_dir: Path) -> list[list[dict]]:
 def summarize(runs: list[list[dict]]) -> dict:
     per_run, trend = [], []
     per_step: dict[str, dict] = defaultdict(lambda: {"pass": 0, "fail": 0})
-    success = decided = 0
+    success = decided = rejected = 0
     for recs in runs:
-        run_rec = next((r for r in recs if r.get("kind") == "run"), None)
+        run_rec = next((r for r in reversed(recs) if r.get("kind") == "run"), None)   # last: a resumed run appends
         outcome = run_rec.get("outcome") if run_rec else "incomplete"
         run_id = (run_rec or recs[0]).get("run_id")
         cost = sum(float(r.get("cost_usd", 0) or 0) for r in recs if r.get("kind") == "step")
@@ -60,11 +61,13 @@ def summarize(runs: list[list[dict]]) -> dict:
             if r.get("kind") in ("step", "guardrail"):
                 key = "pass" if r.get("outcome") in ("success", "passed") else "fail"
                 per_step[r["id"]][key] += 1
-        if outcome in ("success", "failed", "rejected_by_human"):
+        if outcome in ("success", "failed"):
             decided += 1
             success += outcome == "success"
             trend.append(success / decided)
-    return {"total": len(runs), "decided": decided, "success": success,
+        elif outcome == "rejected_by_human":
+            rejected += 1
+    return {"total": len(runs), "decided": decided, "success": success, "rejected": rejected,
             "rate": (success / decided) if decided else 0.0, "per_run": per_run,
             "per_step": dict(per_step), "trend": trend}
 
@@ -73,8 +76,11 @@ def render_markdown(s: dict) -> str:
     lines = [
         "# weekly-log end-to-end success report", "",
         f"Generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}", "",
-        f"**End-to-end success rate: {s['rate']*100:.1f}%** ({s['success']} of {s['decided']} decided runs; "
-        f"{s['total']} runs total, {s['total']-s['decided']} still awaiting a human).", "",
+        f"**End-to-end success rate: {s['rate']*100:.1f}%** ({s['success']} of {s['decided']} runs that ran to a workflow "
+        f"outcome; {s['total']} runs total, {s.get('rejected', 0)} stopped by a human rejection at a punch-out, "
+        f"{s['total']-s['decided']-s.get('rejected', 0)} still awaiting a human).", "",
+        "Rate = success / (success + failed). A human rejection at a punch-out is a decision, not a workflow "
+        "failure, and is listed but not counted against the workflow.", "",
         "## Per run", "", "| # | Run | Mode | Outcome | Origin step (if failed) | Cost USD | Tokens |", "|---|---|---|---|---|---|---|",
     ]
     for i, r in enumerate(s["per_run"], 1):

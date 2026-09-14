@@ -134,16 +134,31 @@ def test_other_teams_target_requires_p2(tmp_path):
     assert (ctx.run_dir / "teams-target.txt").read_text() == "Dragonfly Team"
 
 
-def test_blocked_send_after_approval_is_a_failure(tmp_path):
-    class Blocking(FakeRunner):
+def test_denied_send_that_never_completes_is_a_failure(tmp_path):
+    class Denied(FakeRunner):
         def __call__(self, step_id, prompt, run_dir, model):
             r = super().__call__(step_id, prompt, run_dir, model)
             if step_id == "s3_send":
-                r.blocked_calls = [{"name": "Bash", "input": {"command": "npx ... click e1"}, "error": "BLOCKED sentinel"}]
+                r.blocked_calls = [{"name": "Bash", "input": {"command": "npx ... click 'role=button[name=\"Send\"]'"},
+                                    "error": "BLOCKED by weekly-log guardrail: p2_send_to_others requires human approval"}]
             return r
-    ctx = make_ctx(tmp_path, Blocking(), cache=CACHE, skip_workday=True)
+    ctx = make_ctx(tmp_path, Denied(), cache=CACHE, skip_workday=True)
     assert h.sequence(ctx) == h.FAILED
     assert read_audit(ctx.run_dir)[-1]["origin_step"] == "s3_send"
+
+
+def test_nudged_send_that_then_completes_is_success(tmp_path):
+    class Nudged(FakeRunner):
+        def __call__(self, step_id, prompt, run_dir, model):
+            r = super().__call__(step_id, prompt, run_dir, model)
+            if step_id == "s3_send":
+                # a transient unresolved-ref nudge, then a successful role-selector send
+                r.blocked_calls = [{"name": "Bash", "input": {"command": "npx ... click e804"},
+                                    "error": "BLOCKED by weekly-log guardrail: ... no recent snapshot names ..."}]
+                r.tool_calls.append({"name": "Bash", "input": {"command": "npx ... click 'role=button[name=\"Send (⌘ Return)\"]'"}})
+            return r
+    ctx = make_ctx(tmp_path, Nudged(), cache=CACHE, skip_workday=True)
+    assert h.sequence(ctx) == h.SUCCESS
 
 
 def test_next_monday():
@@ -173,3 +188,25 @@ def test_inject_fault_s1_is_caught_by_g1(tmp_path):
     recs = read_audit(ctx.run_dir)
     assert [r["id"] for r in recs] == ["s1_activity", "inject_s1_activity", "g1_activity_check", "r1"]
     assert recs[-1]["origin_step"] == "s1_activity" and "agentic-org#99999" in recs[-1]["reason"]
+
+
+def test_rejection_sentinel_ends_run_rejected(tmp_path):
+    runner = FakeRunner()
+    ctx = make_ctx(tmp_path, runner, cache=CACHE)
+    ctx.run_dir.mkdir(parents=True, exist_ok=True)
+    (ctx.run_dir / f"rejected-{h.P1}.sentinel").write_text("never submit a test week")
+    assert h.sequence(ctx) == h.REJECTED
+    recs = read_audit(ctx.run_dir)
+    p = next(r for r in recs if r["id"] == h.P1)
+    assert p["outcome"] == h.REJECTED and "never submit" in p["note"]
+    assert "s2c_submit" not in runner.calls
+
+
+def test_test_mode_never_submits(tmp_path):
+    runner = FakeRunner()
+    ctx = make_ctx(tmp_path, runner, cache=CACHE, mode="test")
+    assert h.sequence(ctx) == h.SUCCESS
+    assert runner.calls == ["s1_activity", "s2a_plan", "s2b_enter", "s3_send"]
+    recs = read_audit(ctx.run_dir)
+    assert next(r for r in recs if r["id"] == h.P1)["outcome"] == "skipped"
+    assert next(r for r in recs if r["id"] == "s2c_submit")["outcome"] == "skipped"

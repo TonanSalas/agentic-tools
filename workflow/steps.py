@@ -18,7 +18,11 @@ from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUN_DIR_ENV = "WEEKLY_LOG_RUN_DIR"
-BLOCK_MARKER = "sentinel"
+# The hook prefixes every block with this exact phrase. Matching the word
+# "sentinel" alone was wrong: the hook's own script path (require_sentinel.py)
+# echoes into the error text, so a mere unresolved-ref nudge looked like a denial.
+BLOCK_MARKER = "BLOCKED by weekly-log guardrail"
+DENIAL_MARKER = "requires human approval"        # a real punch-out denial, vs a retryable nudge
 
 
 @dataclass
@@ -26,7 +30,7 @@ class StepResult:
     text: str = ""
     tool_calls: list[dict] = field(default_factory=list)      # completed without error
     failed_calls: list[dict] = field(default_factory=list)    # tool_result is_error, not a hook block
-    blocked_calls: list[dict] = field(default_factory=list)   # refused by the sentinel hook
+    blocked_calls: list[dict] = field(default_factory=list)   # refused by the sentinel hook (denial or nudge)
     model_usage: dict = field(default_factory=dict)
     total_cost_usd: float = 0.0
     input_tokens: int = 0
@@ -43,6 +47,22 @@ class StepResult:
     @property
     def models(self) -> list[str]:
         return sorted(self.model_usage)
+
+    @property
+    def denied_calls(self) -> list[dict]:
+        """Blocks that were real punch-out denials (missing sentinel), not the
+        retryable 'take a fresh snapshot' nudge for an unresolvable ref."""
+        return [c for c in self.blocked_calls if DENIAL_MARKER in c.get("error", "")]
+
+    def committed(self, *needles: str) -> bool:
+        """Did any SUCCESSFUL tool call click a committing button (by any of
+        `needles`, e.g. 'Send' or 'Submit')? A blocked attempt that the model
+        then retried successfully counts as committed."""
+        for c in self.tool_calls:
+            cmd = c["input"].get("command", "")
+            if "click" in cmd and any(n in cmd for n in needles):
+                return True
+        return False
 
 
 def _result_text(content) -> str:
@@ -80,7 +100,7 @@ def parse_stream(lines: Iterable[str], raw_path: Path) -> StepResult:
                 call = dict(attempted.get(b.get("tool_use_id", ""), {"name": "tool", "input": {}}))
                 if b.get("is_error"):
                     call["error"] = _result_text(b.get("content"))
-                    (r.blocked_calls if BLOCK_MARKER in call["error"].lower() else r.failed_calls).append(call)
+                    (r.blocked_calls if BLOCK_MARKER in call["error"] else r.failed_calls).append(call)
                 else:
                     r.tool_calls.append(call)
         elif t == "result":

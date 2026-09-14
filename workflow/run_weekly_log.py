@@ -146,6 +146,12 @@ def do_guardrail(ctx: Context, gid: str, result: GuardrailResult, checked: str, 
 
 def punch_out(ctx: Context, pid: str, evidence: str) -> None:
     sentinel = ctx.path(f"approved-{pid}.sentinel")
+    rejected = ctx.path(f"rejected-{pid}.sentinel")
+    if rejected.exists():
+        ctx.audit.record("punchout", pid, REJECTED, sentinel_path=str(rejected), decision="reject",
+                         decided_by="human (rejection sentinel)", note=rejected.read_text(encoding="utf-8").strip()[:500])
+        _log(f"  ✗ {pid}: rejected by human ({rejected.name})")
+        raise StopRun(REJECTED, None, f"{pid} rejected by human")
     if sentinel.exists():
         ctx.audit.record("punchout", pid, "approved", sentinel_path=str(sentinel), decision="approve",
                          decided_by="human (sentinel present)")
@@ -226,8 +232,16 @@ def sequence(ctx: Context) -> str:
                 if not _already_done(ctx, "g3_entry_check"):
                     do_guardrail(ctx, "g3_entry_check", check_entry(plan, entry), str(entry_path), "s2b_enter")
                 evidence = _plan_table(plan) + f"\nWorkday totals read back: {entry.get('totals')}\nScreenshot: {entry.get('screenshot')}"
-                punch_out(ctx, P1, evidence)
-                if not _already_done(ctx, "s2c_submit"):
+                if ctx.mode == "test" and not ctx.path(f"rejected-{P1}.sentinel").exists():
+                    # Policy (human decision, 2026-09-13): a test run never submits a timesheet,
+                    # because a submitted week cannot be deleted afterwards. The entries stay
+                    # unsubmitted and cleanup_workday.py removes them.
+                    ctx.audit.record("punchout", P1, "skipped", reason="test mode never submits (policy)", evidence=evidence)
+                    ctx.audit.record("step", "s2c_submit", "skipped", reason="test mode never submits (policy)")
+                    _log(f"  – {P1}/s2c_submit skipped: test mode never submits (policy)")
+                else:
+                    punch_out(ctx, P1, evidence)
+                if ctx.mode != "test" and not _already_done(ctx, "s2c_submit"):
                     r = do_step(ctx, "s2c_submit", prompts.s2c())
                     if r.blocked_calls:
                         ctx.audit.record("guardrail", "hook_p1", FAILED, reason="Submit click blocked by hook after approval",
@@ -249,10 +263,10 @@ def sequence(ctx: Context) -> str:
                 ctx.audit.record("punchout", P2, "not_required", reason="target is the self-chat")
             if not _already_done(ctx, "s3_send"):
                 r = do_step(ctx, "s3_send", prompts.s3(msg_path, ctx.teams_target, ctx.dry_run))
-                if r.blocked_calls:
-                    ctx.audit.record("guardrail", "hook_p2", FAILED, reason="Send click blocked by hook",
-                                     blocked=[c["input"].get("command") for c in r.blocked_calls], origin_step="s3_send")
-                    raise StopRun(FAILED, "s3_send", "send click was blocked by the sentinel hook")
+                if not ctx.dry_run and r.denied_calls and not r.committed("Send"):
+                    ctx.audit.record("guardrail", "hook_p2", FAILED, reason="Send click denied by hook and never completed",
+                                     blocked=[c["input"].get("command") for c in r.denied_calls], origin_step="s3_send")
+                    raise StopRun(FAILED, "s3_send", "send click was denied by the sentinel hook")
         return _finish(ctx, SUCCESS)
     except StopRun as s:
         return _finish(ctx, s.outcome, s.origin_step, s.reason)

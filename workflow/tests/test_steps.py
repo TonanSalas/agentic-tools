@@ -35,13 +35,29 @@ def _events(tool_result_error: bool, text: str):
     ]
 
 
-def test_blocked_sentinel_call_is_separated(tmp_path: Path):
-    r = parse_stream(_events(True, "BLOCKED by weekly-log guardrail: missing sentinel"), tmp_path / "r.jsonl")
+def test_blocked_guardrail_call_is_separated(tmp_path: Path):
+    r = parse_stream(_events(True, "BLOCKED by weekly-log guardrail: p1_submit_timesheet requires human approval"), tmp_path / "r.jsonl")
     assert r.tool_calls == []
-    assert len(r.blocked_calls) == 1 and "sentinel" in r.blocked_calls[0]["error"]
+    assert len(r.blocked_calls) == 1 and len(r.denied_calls) == 1
 
 
-def test_plain_error_is_not_blocked(tmp_path: Path):
+def test_unresolved_ref_nudge_is_blocked_but_not_denied(tmp_path: Path):
+    r = parse_stream(_events(True, "BLOCKED by weekly-log guardrail: ... no recent snapshot names ..."), tmp_path / "r.jsonl")
+    assert len(r.blocked_calls) == 1 and r.denied_calls == []
+
+
+def test_committed_detects_successful_send(tmp_path: Path):
+    evs = [
+        __import__("json").dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "npx x click 'role=button[name=\"Send\"]'"}}]}}),
+        __import__("json").dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "is_error": False, "content": "ok"}]}}),
+        __import__("json").dumps({"type": "result", "result": "done", "session_id": "s", "total_cost_usd": 0.0, "usage": {}, "modelUsage": {}}),
+    ]
+    assert parse_stream(evs, tmp_path / "r.jsonl").committed("Send") is True
+
+
+def test_plain_error_is_failed_not_blocked(tmp_path: Path):
     r = parse_stream(_events(True, "command not found"), tmp_path / "r.jsonl")
     assert r.tool_calls == [] and r.blocked_calls == []
     assert r.failed_calls and r.failed_calls[0]["error"] == "command not found"

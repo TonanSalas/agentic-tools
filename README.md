@@ -8,18 +8,24 @@ This README doubles as a **replication guide**: if you're Claude Code running on
 
 | Skill | What it does |
 |-------|--------------|
-| `/workday-timelogger` | Gathers GitHub activity, builds an entry plan, then fills the Workday timesheet via browser automation. |
+| `/weekly-log` | **Stage 4 workflow.** Runs the three skills below end to end (activity → Workday → Teams) through a guarded, audited harness with automated guardrails, human punch-outs, and a per-step cost log. See [`stage4/`](stage4/). |
+| `/workday-timelogger` | Gathers GitHub activity, builds an entry plan (via the tested `plan_entries.py`), then fills the Workday timesheet via browser automation. |
 | `/weekly-activity` | Auto-discovers active `dragonflyic` repos and reports commits/PRs/issues for a date range (Python + `gh`), plus a TEC status report as Teams-ready HTML. |
-| `/teams-messenger` | Sends a (rich-text) message to a Teams chat or channel via browser automation. |
+| `/teams-messenger` | Sends a (rich-text) message to a Teams chat or channel via browser automation (HTML via the tested `to_teams_html.py`). |
 
 Each skill lives in `.claude/skills/<name>/SKILL.md`. Read those files — they are the authoritative, battle-tested versions. This README explains the *reusable patterns* behind them.
 
 **Usage examples:**
 ```
+/weekly-log --week 2026-09-14..2026-09-18 --hours "Mon 8, Tue 8, Wed 8, Thu 8, Fri 8"
 /workday-timelogger "Mon 11, Tue 8, Wed 8, Thu 8, Fri 5"
 /weekly-activity 2026-04-07..2026-04-11
 /teams-messenger "Standup done ✅" "Dragonfly Team"
 ```
+
+## Stage 4 workflow
+
+`/weekly-log` chains the three Stage 3 skills into one evaluated, guarded, auditable workflow. Its certification package (workflow definition, guardrails, punch-out bypass evidence, end-to-end success report, audit trail) lives in [`stage4/`](stage4/); the harness is in [`workflow/`](workflow/); the design spec and plan are under `docs/superpowers/`.
 
 ---
 

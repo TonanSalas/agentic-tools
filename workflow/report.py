@@ -58,7 +58,9 @@ def summarize(runs: list[list[dict]]) -> dict:
             "cost_usd": round(cost, 4), "tokens": tokens, "ts": recs[0].get("ts", ""),
         })
         for r in recs:
-            if r.get("kind") in ("step", "guardrail"):
+            # Count only real outcomes; skipped / not_required / awaiting / approved
+            # records are neither a pass nor a fail of that step.
+            if r.get("kind") in ("step", "guardrail") and r.get("outcome") in ("success", "passed", "failed"):
                 key = "pass" if r.get("outcome") in ("success", "passed") else "fail"
                 per_step[r["id"]][key] += 1
         if outcome in ("success", "failed"):

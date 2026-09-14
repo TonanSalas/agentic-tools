@@ -43,10 +43,11 @@ def _cli(*args: str, timeout: int = 60) -> str:
 
 
 def _snapshot() -> str:
-    _cli("snapshot")
-    import glob, os
-    files = sorted(glob.glob(".playwright-cli/page-*.yml"), key=os.path.getmtime)
-    return open(files[-1], encoding="utf-8", errors="replace").read() if files else ""
+    # The CLI prints the accessibility tree to stdout; read it directly rather
+    # than hunting for a page-*.yml file (which this CLI version does not always
+    # write, and whose newest-by-mtime is unreliable when several sessions share
+    # the directory).
+    return _cli("snapshot")
 
 
 def _first_entry_ref(snap: str) -> str | None:

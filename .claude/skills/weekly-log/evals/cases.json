@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "test-dry-run-skip-workday",
-      "inputs": "/weekly-log --test --dry-run --skip-workday",
+      "inputs": "/weekly-log --test --dry-run --skip-workday --runs-dir workflow/runs-eval/test-dry-run-skip-workday",
       "metadata": {
         "why": "The workflow's own Stage 3 eval: the skill must launch the harness (not perform steps itself) and the harness must finish with outcome success. Dry run + skip-workday keeps it free of side effects beyond a Teams dry-run paste."
       },
@@ -14,7 +14,8 @@
               "workflow/run_weekly_log.py",
               "--test",
               "--dry-run",
-              "--skip-workday"
+              "--skip-workday",
+              "--runs-dir workflow/runs-eval/test-dry-run-skip-workday"
             ]
           }
         },
@@ -34,7 +35,7 @@
         },
         {
           "AuditOutcome": {
-            "runs_dir": "workflow/runs",
+            "runs_dir": "workflow/runs-eval/test-dry-run-skip-workday",
             "expected_outcome": "success"
           }
         },
@@ -47,7 +48,7 @@
     },
     {
       "name": "test-dry-run-full-plan",
-      "inputs": "/weekly-log --test --dry-run",
+      "inputs": "/weekly-log --test --dry-run --runs-dir workflow/runs-eval/test-dry-run-full-plan",
       "metadata": {
         "why": "Same, but the Workday planning step and its guardrail run too (entry/submit skipped by dry-run)."
       },
@@ -57,7 +58,8 @@
             "required_tool_calls": [
               "workflow/run_weekly_log.py",
               "--test",
-              "--dry-run"
+              "--dry-run",
+              "--runs-dir workflow/runs-eval/test-dry-run-full-plan"
             ]
           }
         },
@@ -70,7 +72,7 @@
         },
         {
           "AuditOutcome": {
-            "runs_dir": "workflow/runs",
+            "runs_dir": "workflow/runs-eval/test-dry-run-full-plan",
             "expected_outcome": "success"
           }
         }

@@ -481,6 +481,9 @@ def main() -> None:
     parser.add_argument("skill", help="Skill directory name under .claude/skills/")
     parser.add_argument("--repeat", type=int, default=1, help="Times to repeat each case (default 1)")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model for the task turns and the judge (default {DEFAULT_MODEL})")
+    parser.add_argument("--concurrency", type=int, default=1,
+                        help="Cases run in parallel (default 1: browser-driving skills share one Playwright "
+                             "session per site and must not interleave)")
     args = parser.parse_args()
 
     cases_path = REPO_ROOT / ".claude" / "skills" / args.skill / "evals" / "cases.json"
@@ -516,7 +519,8 @@ def main() -> None:
     branch = get_git_branch()
     run_started = datetime.now(timezone.utc)
     run_name = f"{branch}_{run_started.strftime('%Y%m%d-%H%M%S')}"
-    report = dataset.evaluate_sync(make_task(args.model), name=run_name, repeat=args.repeat)
+    report = dataset.evaluate_sync(make_task(args.model), name=run_name, repeat=args.repeat,
+                                   max_concurrency=args.concurrency)
     run_ended = datetime.now(timezone.utc)
     # include_reasons matters: without it a failure prints as a bare "x" and the
     # only way to learn why is to open the Logfire trace. Every evaluator here

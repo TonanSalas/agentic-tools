@@ -29,52 +29,65 @@ Constraints:
 - Max 3 extra hours per day (second entry)
 - Max 11 total hours per day
 
+## Phase flags (harness mode)
+
+The `weekly-log` harness calls this skill one phase at a time. When the invocation carries one of these flags, do only that phase, write the named output file, and stop. Do not ask the user anything in harness mode.
+
+- `--plan-only --hours "..." --week-start YYYY-MM-DD [--activity FILE] --out FILE`: Phase 2 only. Run `plan_entries.py` with those arguments, print the two tables, and stop. No browser.
+- `--enter-only PLAN --out FILE`: Phases 3–6 driven by the plan JSON at `PLAN`. Afterwards read the per-day hour totals from the Enter My Time header row, save a screenshot to `.playwright-mcp/<week_start>.png`, and write `{"entries":[{"date","entry","hours","status"}],"totals":{"YYYY-MM-DD": hours},"screenshot": path}` to `--out`, where `status` is one of `Entered`, `Already filled`, `Locked`, `Error`. Do NOT click Review or Submit.
+- `--submit-only`: Phase 7 step 6 only. The browser session `-s=workday` is already on the Enter My Time weekly view. Click Review, snapshot, then click Submit **by role name** (`click 'button "Submit"'`), verify, and stop. If that click is blocked by the sentinel hook, report the hook's message verbatim and stop — never retry with a ref, coordinates, or any other selector.
+
 ## Phase 1: Gather Activity
 
-Derive the date range from the user's input (earliest day through latest day), then **clamp the end date to today** — there is no GitHub activity for future days. Call the `/weekly-activity` skill using the Skill tool with the clamped range:
+Derive the date range from the user's input (Monday of the week through the latest day named), then **clamp the end date to today** — there is no GitHub activity for future days. Call the `/weekly-activity` skill using the Skill tool with the clamped range:
 
 ```
-skill: "weekly-activity", args: "2026-03-30..2026-04-04"
+skill: "weekly-activity", args: "2026-03-30..2026-04-03"
 ```
 
-For days beyond today (e.g. logging a future week pre-emptively), skip the activity call and use `Activity placeholder` as the comment for those days.
-
-This returns a day-by-day table of tickets and PRs touched. Parse the output to build two tables.
+Save the YAML it returns verbatim to `.playwright-mcp/activity-<week_start>.yaml` (or use the `--activity` file when one is given). If every requested day is in the future, skip the activity call and pass no `--activity` file; the planner writes `Activity placeholder` comments for those days.
 
 ## Phase 2: Plan Entries
 
-For each day the user specified:
+Never do the split, ticket-distribution or comment arithmetic yourself. Run the planner:
 
-1. **Split hours**: If hours > 8, split into regular (8) + extra (hours - 8)
-2. **Distribute tickets**: Assign tickets from that day's activity across entries proportionally
-   - Entry 1 (regular): gets the majority of tickets (roughly `ceil(total_tickets * 8 / total_hours)`)
-   - Entry 2 (extra): gets the remaining tickets
-   - If only 1 ticket for the day, use it in both entries
-3. **Filter tickets**: Drop any ticket with an `(unknown #N)` title — these are unresolved cross-repo references, not real work items.
-4. **Build comments**:
-   - Format: `"#123: Fix auth token, #456: Update API"` (tickets + short titles)
-   - If the comment exceeds the Workday field length, strip the titles and use just ticket numbers: `"#123, #456, #789"`
+```bash
+python3 "<skill-directory>/scripts/plan_entries.py" \
+  --hours "Mon 11, Tue 8, Wed 8, Thu 8, Fri 5" \
+  --week-start 2026-03-30 \
+  --activity .playwright-mcp/activity-2026-03-30.yaml \
+  --today 2026-04-05 \
+  --out .playwright-mcp/plan-2026-03-30.json
+```
 
-Present **two tables** to the user and confirm before proceeding.
+The script encodes the rules (tested in `tests/test_plan_entries.py`):
 
-**Table 1 — Workday Entries** (one row per Workday entry, so days >8h get two rows):
+1. Hours > 8 are split into a `Reg` entry (8) and an `Extra` entry (remainder, max 3).
+2. Tickets are distributed proportionally: `Reg` gets `ceil(n * 8 / total)`, `Extra` the rest; a single ticket goes in both.
+3. `(unknown #N)` titles are dropped — unresolved cross-repo references, not work items.
+4. Comments are `ref: title, ref: title`; if that exceeds 255 chars, refs only.
+5. Days after today, or past days with no items, get the comment `Activity placeholder`.
+
+Render the plan JSON as **two tables** and confirm with the user before proceeding (skip the confirmation in harness mode).
+
+**Table 1 — Workday Entries** (one row per plan entry, so days >8h get two rows):
 ```
 | Day       | Entry | Hours | Comment                                    |
 |-----------|-------|-------|--------------------------------------------|
-| Mon 04/01 | Reg   | 8     | #123: Fix auth token, #456: Update API     |
-| Mon 04/01 | Extra | 3     | #789: Refactor broker service               |
-| Tue 04/02 | Reg   | 8     | #456: Update API (review), #790: Add tests |
-| Wed 04/03 | Reg   | 8     | Activity placeholder                        |
+| Mon 04/01 | Reg   | 8     | ao#123: Fix auth token, ao#456: Update API |
+| Mon 04/01 | Extra | 3     | ao#789: Refactor broker service            |
+| Tue 04/02 | Reg   | 8     | ao#456: Update API, ao#790: Add tests      |
+| Wed 04/03 | Reg   | 8     | Activity placeholder                       |
 ```
 
-**Table 2 — Issues Referenced** (deduplicated list of all issues with their titles):
+**Table 2 — Issues Referenced** (the plan's `issues` list):
 ```
-| Issue | Title                  |
-|-------|------------------------|
-| #123  | Fix auth token         |
-| #456  | Update API             |
-| #789  | Refactor broker service|
-| #790  | Add tests              |
+| Issue  | Title                   |
+|--------|-------------------------|
+| ao#123 | Fix auth token          |
+| ao#456 | Update API              |
+| ao#789 | Refactor broker service |
+| ao#790 | Add tests               |
 ```
 
 ## Phase 3: Launch Browser & Login
@@ -189,7 +202,7 @@ Days completed: 3/4
 
 4. Ask the user: **"Please review the entries in the browser. Let me know if anything needs to be changed, or say 'approved' to submit."**
 5. If the user requests changes, make the corrections (click the entry to edit, update fields, save) and repeat from step 2.
-6. Once the user approves, click the **Review** button on the weekly view, snapshot to confirm the review/submit dialog, and click **Submit** (or **Confirm**, depending on what Workday shows). Verify the submission succeeded with a final snapshot.
+6. Once the user approves, click the **Review** button on the weekly view, snapshot to confirm the review/submit dialog, and click **Submit** by role name — `npx @playwright/cli@latest -s=workday click 'button "Submit"'` (or `'button "Confirm"'` if that is what Workday shows). Always click this button by role name, never by ref: the repo's sentinel hook recognises the committing click by its name. Verify the submission succeeded with a final snapshot.
 
 ## Phase 8: Final Summary
 

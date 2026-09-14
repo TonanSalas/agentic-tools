@@ -11,6 +11,14 @@ still open and are excluded from the denominator).
 """
 from __future__ import annotations
 
+# Allow `python3 workflow/<file>.py` as well as `python3 -m workflow.<file>`.
+if __package__ in (None, ""):
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parent.parent))
+    import importlib as _il
+    _sys.exit(_il.import_module("workflow." + _P(__file__).stem).main())
+
 import argparse
 from collections import defaultdict
 from datetime import datetime, timezone

@@ -11,9 +11,11 @@ exists in that run directory:
                           (only when teams-target.txt names a chat other
                            than the self-chat)
 
-A click by ref (`click e123`) is resolved against the newest snapshot file in
-.playwright-cli/, which records `- button "Send (⌘ Return)" [ref=e123]`. So
-switching from a role selector to a ref does not evade the check. Outside a
+A click by ref (`click e123`) is resolved against every snapshot file written
+to .playwright-cli/ in the last 15 minutes (they record lines like
+`- button "Send (⌘ Return)" [ref=e123]`); a ref that no recent snapshot names
+is blocked in harness mode until a fresh snapshot is taken. So switching from
+a role selector to a ref does not evade the check. Outside a
 harness run the hook never blocks: interactive skills keep their chat-based
 confirmation, and unrelated sessions are unaffected.
 
@@ -33,37 +35,53 @@ RUN_DIR_ENV = "WEEKLY_LOG_RUN_DIR"
 SELF_CHAT = "Tonan Salas (You)"
 P1, P2 = "p1_submit_timesheet", "p2_send_to_others"
 
-_REF_RE = re.compile(r"\bclick\s+['\"]?(e\d+)['\"]?")
+_REF_RE = re.compile(r"\bclick\s+['\"]?((?:f\d+)?e\d+)['\"]?")
 _SNAPSHOT_GLOB = "page-*.yml"
+_SNAPSHOT_WINDOW_S = 15 * 60
+UNRESOLVED = "unresolved_ref"
 
 
 def repo_root() -> Path:
     return Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path(__file__).resolve().parents[2])
 
 
-def ref_name(ref: str, snapshot_dir: Path) -> str:
-    """Accessible role+name line for `ref` in the newest snapshot, or ''."""
-    files = sorted(snapshot_dir.glob(_SNAPSHOT_GLOB), key=lambda p: p.stat().st_mtime)
-    if not files:
-        return ""
+def ref_names(ref: str, snapshot_dir: Path, now: float | None = None) -> list[str]:
+    """Every accessible role+name line recorded for `ref` in snapshots taken
+    within the last 15 minutes, newest first. Several browser sessions share
+    one snapshot directory and refs repeat across pages, so the caller treats
+    a match in ANY recent snapshot as the committing button."""
+    import time
+    now = now or time.time()
+    files = sorted(snapshot_dir.glob(_SNAPSHOT_GLOB), key=lambda p: p.stat().st_mtime, reverse=True)
     needle = f"[ref={ref}]"
-    for line in files[-1].read_text(encoding="utf-8", errors="replace").splitlines():
-        if needle in line:
-            return line.strip()
-    return ""
+    out = []
+    for f in files:
+        if now - f.stat().st_mtime > _SNAPSHOT_WINDOW_S:
+            break
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            if needle in line:
+                out.append(line.strip())
+                break
+    return out
 
 
 def classify(command: str, snapshot_dir: Path | None = None) -> str | None:
+    """P1 / P2 for a committing click, UNRESOLVED for a ref click that no recent
+    snapshot can name (the caller blocks it in harness mode), else None."""
     cmd = command.replace("\n", " ")
     if "-s=workday" in cmd:
         if "click" in cmd:
-            target = _target_text(cmd, snapshot_dir)
-            if _names(target, ("Submit", "Confirm")):
+            targets = _target_texts(cmd, snapshot_dir)
+            if targets is None:
+                return UNRESOLVED
+            if any(_names(t, ("Submit", "Confirm")) for t in targets):
                 return P1
     elif "-s=teams" in cmd:
         if "click" in cmd:
-            target = _target_text(cmd, snapshot_dir)
-            if _names(target, ("Send",)):
+            targets = _target_texts(cmd, snapshot_dir)
+            if targets is None:
+                return UNRESOLVED
+            if any(_names(t, ("Send",)) for t in targets):
                 return P2
         if re.search(r'press\s+"?(Meta\+|Control\+|Ctrl\+)?(Enter|Return)"?', cmd):
             return P2
@@ -78,11 +96,14 @@ def _names(target: str, names: tuple[str, ...]) -> bool:
     return re.search(rf'(button\s*"|name=")({alt})\b', target) is not None
 
 
-def _target_text(cmd: str, snapshot_dir: Path | None) -> str:
+def _target_texts(cmd: str, snapshot_dir: Path | None) -> list[str] | None:
+    """Selector text(s) to inspect: the command itself, or -- for a ref click --
+    the snapshot lines that name the ref. None when a ref cannot be resolved."""
     m = _REF_RE.search(cmd)
-    if m and snapshot_dir is not None:
-        return ref_name(m.group(1), snapshot_dir) or cmd
-    return cmd
+    if not m or snapshot_dir is None:
+        return [cmd]
+    names = ref_names(m.group(1), snapshot_dir)
+    return names or None
 
 
 def decide(command: str, run_dir: Path | None, snapshot_dir: Path) -> tuple[int, str]:
@@ -91,6 +112,10 @@ def decide(command: str, run_dir: Path | None, snapshot_dir: Path) -> tuple[int,
         return 0, ""
     if run_dir is None:
         return 0, f"{pid}: outside harness run, not enforced"
+    if pid == UNRESOLVED:
+        return 2, ("BLOCKED by weekly-log guardrail: this click targets an element ref that no recent "
+                   "snapshot names, so it cannot be checked against the human sign-off. Take a fresh "
+                   "`snapshot` and click the ref it shows, or click by role selector.")
     if pid == P2:
         target_file = run_dir / "teams-target.txt"
         target = target_file.read_text(encoding="utf-8").strip() if target_file.exists() else SELF_CHAT

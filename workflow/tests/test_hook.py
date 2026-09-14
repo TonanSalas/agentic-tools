@@ -39,6 +39,32 @@ def test_classify_resolves_ref_from_snapshot(tmp_path):
     assert hook.classify("npx @playwright/cli@latest -s=teams click e5", sd) is None
 
 
+def test_ref_found_in_older_recent_snapshot_still_counts(tmp_path):
+    import os, time
+    sd = snapshot_dir(tmp_path)
+    older = sd / "page-2026-01-01T00-00-00-000Z.yml"
+    newer = sd / "page-2026-01-01T00-01-00-000Z.yml"
+    newer.write_text('- button "Something else" [ref=e1758]\n')      # another session's page reused the ref
+    os.utime(older, (time.time() - 60, time.time() - 60))
+    assert hook.classify("npx @playwright/cli@latest -s=teams click e1758", sd) == hook.P2
+
+
+def test_unresolved_ref_blocks_only_in_harness(tmp_path):
+    sd = snapshot_dir(tmp_path)
+    cmd = "npx @playwright/cli@latest -s=teams click e424242"
+    assert hook.classify(cmd, sd) == hook.UNRESOLVED
+    assert hook.decide(cmd, None, sd)[0] == 0
+    run = tmp_path / "run"; run.mkdir()
+    code, msg = hook.decide(cmd, run, sd)
+    assert code == 2 and "fresh" in msg
+
+
+def test_workday_iframe_refs(tmp_path):
+    sd = snapshot_dir(tmp_path)
+    (sd / "page-2026-01-01T00-00-01-000Z.yml").write_text('- button "Submit" [ref=f1e77]\n')
+    assert hook.classify("npx @playwright/cli@latest -s=workday click f1e77", sd) == hook.P1
+
+
 def test_decide_outside_harness_never_blocks(tmp_path):
     sd = snapshot_dir(tmp_path)
     code, _ = hook.decide("npx @playwright/cli@latest -s=workday click 'role=button[name=\"Submit\"]'", None, sd)

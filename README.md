@@ -81,7 +81,7 @@ Key facts that apply to every browser skill:
 - **`-s=<name>` isolates a session.** Use a distinct name per skill (`workday`, `teams`) so their cookies/windows don't collide.
 - **`--persistent --headed`** keeps the profile on disk (so SSO login is a one-time manual step) and keeps the window visible (so the user can complete auth and watch).
 - **Refs come from `snapshot` and go stale.** Any action that mutates the DOM (selecting a dropdown option, opening a dialog) invalidates the refs you read before it. Re-snapshot after a mutation; reuse refs only while the page is static.
-- **You can also click by accessible role+name** (e.g. `click 'button "Send"'`) — more stable than positional refs when the name is unique. Prefer this when you know the name; fall back to a ref from the snapshot otherwise.
+- **You can also click by role selector** (e.g. `click 'role=button[name="Send"]'`) — more stable than positional refs when the name is unique. (The older `click 'button "Send"'` form is not a valid selector in current Playwright CLI versions.) Prefer this when you know the name; fall back to a ref from the snapshot otherwise.
 - **SSO is interactive.** On first run the snapshot shows a login page. Tell the user to complete SSO in the Chrome window, then wait for their confirmation before continuing. The persistent profile means later runs are already authenticated.
 - **`eval`** runs JS in the page (used in Workday to read element geometry). **`mousemove`/`mousedown`/`mouseup`** issue *real* mouse events at coordinates — needed when an element isn't in the accessibility tree (see Workday recipe).
 - **Run `npx` plain.** Only prefix with `source ~/.nvm/nvm.sh &&` if a bare `npx` fails because Node isn't on `PATH`.

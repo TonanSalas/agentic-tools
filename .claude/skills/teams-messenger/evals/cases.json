@@ -1,0 +1,102 @@
+{
+  "name": "teams-messenger",
+  "cases": [
+    {
+      "name": "dry-run-markdown-self-chat",
+      "inputs": "/teams-messenger --dry-run \"# weekly-log eval\n**Status:** dry run\n* first point\n* second point\" \"Tonan Salas (You)\"",
+      "metadata": {
+        "why": "The full recipe minus the Send click: convert via the script with --clipboard, paste, verify the compose box, then stop. Grades that the script owns conversion and that Send was never clicked."
+      },
+      "evaluators": [
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "to_teams_html.py",
+              "--clipboard"
+            ]
+          }
+        },
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "-s=teams",
+              "Meta+v"
+            ]
+          }
+        },
+        {
+          "NoCommandContaining": {
+            "forbidden": [
+              "-s=teams",
+              "Send"
+            ]
+          }
+        },
+        {
+          "NoCommandContaining": {
+            "forbidden": [
+              "swift -e"
+            ]
+          }
+        },
+        {
+          "ClaudeCLIJudge": {
+            "rubric": "Grade the response text only. Reply PASS unless one of these FAIL conditions holds:\n- FAIL if the words 'dry run' (any capitalisation) do NOT appear in the response.\n- FAIL if the response does NOT name 'Tonan Salas (You)' as the target chat.\n- FAIL if the response claims the message was SENT or DELIVERED (saying it was staged, pasted or verified in the compose box is fine and must not fail).\n- FAIL if the response asks the user to complete a login."
+          }
+        }
+      ]
+    },
+    {
+      "name": "live-send-self-chat",
+      "inputs": "/teams-messenger \"weekly-log eval ping 2026-09-13\" \"Tonan Salas (You)\"",
+      "metadata": {
+        "why": "One real send, to the self-chat only, so delivery confirmation is exercised without messaging anyone else."
+      },
+      "evaluators": [
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "to_teams_html.py"
+            ]
+          }
+        },
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "-s=teams",
+              "click",
+              "Send"
+            ]
+          }
+        },
+        {
+          "ClaudeCLIJudge": {
+            "rubric": "Grade the response text only. Reply PASS unless one of these FAIL conditions holds:\n- FAIL if the response does NOT confirm the message was sent or delivered to 'Tonan Salas (You)'.\n- FAIL if the response describes the send as a dry run.\n- FAIL if the response reports an error or a failed delivery."
+          }
+        }
+      ]
+    },
+    {
+      "name": "unknown-target-dry-run",
+      "inputs": "/teams-messenger --dry-run \"hello\" \"Nonexistent Chat XYZ 9000\"",
+      "metadata": {
+        "why": "A target that does not exist must end in a clarification, never a send into some other chat."
+      },
+      "evaluators": [
+        {
+          "NoCommandContaining": {
+            "forbidden": [
+              "-s=teams",
+              "Send"
+            ]
+          }
+        },
+        {
+          "ClaudeCLIJudge": {
+            "rubric": "Grade the response text only. Reply PASS unless one of these FAIL conditions holds:\n- FAIL if the response does NOT say (in any wording) that the chat or channel 'Nonexistent Chat XYZ 9000' could not be found.\n- FAIL if the response neither lists some visible chats/channels nor asks the user to clarify the target.\n- FAIL if the response claims the message was sent, staged or pasted anywhere."
+          }
+        }
+      ]
+    }
+  ]
+}

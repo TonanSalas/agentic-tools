@@ -84,7 +84,7 @@ Do NOT use `fill` — it produces plain, unformatted text. Instead, paste HTML v
    Note: `press` for keyboard shortcuts does NOT take an element ref — just the key combo.
 6. Snapshot once and grep within the `textbox "Type a message"` block specifically — never grep the whole snapshot, since the chat history above the compose box contains prior rich-text reports and will produce false positives. Use a context-aware grep like `grep -A 30 'textbox "Type a message"'` and check that the distinctive phrase appears inside that block.
 7. **Dry run?** If `--dry-run` was given, stop here: report `DRY RUN: message staged in <chat>, not sent`, clear the box (`press "Meta+a"` then `press "Backspace"`), and leave the browser open. Do not click Send.
-8. Click the **Send** button by role name: `npx @playwright/cli@latest -s=teams click 'button "Send (⌘ Return)"'`. Always click Send by its role name, never by ref — the repo's sentinel hook recognises the committing click by its name. If the click is blocked by that hook, report the hook's message verbatim and stop; never retry with another selector or key combo.
+8. Click the **Send** button by role selector: `npx @playwright/cli@latest -s=teams click 'role=button[name="Send (⌘ Return)"]'`. Prefer this over a ref — the repo's sentinel hook recognises the committing click by its name (it also resolves refs against the latest snapshot). If the click is blocked by that hook, report the hook's message verbatim and stop; never retry with another selector, a ref, or a key combo.
 9. Snapshot once after send and confirm the same phrase now appears in a message bubble (outside the compose textbox).
 
 This whole flow should be ~6–7 tool calls total. Avoid extra snapshots between steps that already returned page state.

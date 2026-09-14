@@ -35,7 +35,7 @@ The `weekly-log` harness calls this skill one phase at a time. When the invocati
 
 - `--plan-only --hours "..." --week-start YYYY-MM-DD [--activity FILE] --out FILE`: Phase 2 only. Run `plan_entries.py` with those arguments, print the two tables, and stop. No browser.
 - `--enter-only PLAN --out FILE`: Phases 3–6 driven by the plan JSON at `PLAN`. Afterwards read the per-day hour totals from the Enter My Time header row, save a screenshot to `.playwright-mcp/<week_start>.png`, and write `{"entries":[{"date","entry","hours","status"}],"totals":{"YYYY-MM-DD": hours},"screenshot": path}` to `--out`, where `status` is one of `Entered`, `Already filled`, `Locked`, `Error`. Do NOT click Review or Submit.
-- `--submit-only`: Phase 7 step 6 only. The browser session `-s=workday` is already on the Enter My Time weekly view. Click Review, snapshot, then click Submit **by role name** (`click 'button "Submit"'`), verify, and stop. If that click is blocked by the sentinel hook, report the hook's message verbatim and stop — never retry with a ref, coordinates, or any other selector.
+- `--submit-only`: Phase 7 step 6 only. The browser session `-s=workday` is already on the Enter My Time weekly view. Click Review, snapshot, then click Submit by role selector (`click 'role=button[name="Submit"]'`), verify, and stop. If that click is blocked by the sentinel hook, report the hook's message verbatim and stop — never retry with a ref, coordinates, or any other selector.
 
 ## Phase 1: Gather Activity
 
@@ -202,7 +202,7 @@ Days completed: 3/4
 
 4. Ask the user: **"Please review the entries in the browser. Let me know if anything needs to be changed, or say 'approved' to submit."**
 5. If the user requests changes, make the corrections (click the entry to edit, update fields, save) and repeat from step 2.
-6. Once the user approves, click the **Review** button on the weekly view, snapshot to confirm the review/submit dialog, and click **Submit** by role name — `npx @playwright/cli@latest -s=workday click 'button "Submit"'` (or `'button "Confirm"'` if that is what Workday shows). Always click this button by role name, never by ref: the repo's sentinel hook recognises the committing click by its name. Verify the submission succeeded with a final snapshot.
+6. Once the user approves, click the **Review** button on the weekly view, snapshot to confirm the review/submit dialog, and click **Submit** by role selector — `npx @playwright/cli@latest -s=workday click 'role=button[name="Submit"]'` (or `name="Confirm"` if that is what Workday shows). Prefer the role selector over a ref: the repo's sentinel hook recognises the committing click by its name (it also resolves refs against the latest snapshot). Verify the submission succeeded with a final snapshot.
 
 ## Phase 8: Final Summary
 

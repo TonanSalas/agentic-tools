@@ -8,3 +8,6 @@
 __pycache__/
 .pytest_cache/
 .claude/logs/
+
+# weekly-log harness run artifacts (evidence copies live in stage4/audit/)
+workflow/runs/

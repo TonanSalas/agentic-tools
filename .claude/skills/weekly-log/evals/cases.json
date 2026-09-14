@@ -48,9 +48,9 @@
     },
     {
       "name": "test-dry-run-full-plan",
-      "inputs": "/weekly-log --test --dry-run --runs-dir workflow/runs-eval/test-dry-run-full-plan",
+      "inputs": "/weekly-log --test --dry-run --skip-teams --runs-dir workflow/runs-eval/test-dry-run-full-plan",
       "metadata": {
-        "why": "Same, but the Workday planning step and its guardrail run too (entry/submit skipped by dry-run)."
+        "why": "Exercises the Workday planning path and its guardrail under dry-run (entry/submit skipped) and confirms the run reaches outcome success. Teams is skipped so the run finishes deterministically even when the harness is itself run inside a headless eval turn; the skip-workday case covers the Teams path."
       },
       "evaluators": [
         {
@@ -59,6 +59,7 @@
               "workflow/run_weekly_log.py",
               "--test",
               "--dry-run",
+              "--skip-teams",
               "--runs-dir workflow/runs-eval/test-dry-run-full-plan"
             ]
           }

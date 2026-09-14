@@ -9,6 +9,8 @@ OK_STATUSES = {"Entered", "Already filled", "Locked"}
 
 
 def check_entry(plan: dict, entry_result: dict) -> GuardrailResult:
+    if entry_result.get("error"):
+        return GuardrailResult.fail(f"entry step reported an error: {entry_result['error']}")
     entries = entry_result.get("entries")
     totals = entry_result.get("totals")
     if not isinstance(entries, list) or not isinstance(totals, dict):

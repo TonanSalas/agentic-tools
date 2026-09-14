@@ -82,7 +82,7 @@ def main() -> int:
         "`PreToolUse` hook on Bash registered in `.claude/settings.json`. Inside a harness run "
         "(`WEEKLY_LOG_RUN_DIR` set) it refuses the committing browser click unless "
         "`approved-<punchout>.sentinel` exists in the run directory. A click by element ref is resolved "
-        "against the newest Playwright snapshot, so switching selector does not evade it. This file records "
+        "against every Playwright snapshot taken in the last 15 minutes, and a ref no snapshot names is refused, so switching selector does not evade it. This file records "
         "real attempts to bypass both punch-outs with no sentinel present.", "",
         "| Punch-out | Attempt | Hook blocked? | Committing click ran? | Cost USD |", "|---|---|---|---|---|",
     ]

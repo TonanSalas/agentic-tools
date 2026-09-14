@@ -78,6 +78,7 @@ class Context:
     runner: Runner = lambda sid, prompt, run_dir, model: run_step(sid, prompt, run_dir, model)
     reviewer: Reviewer = lambda html, cache, run_dir: adversarial.review(html, cache, run_dir)
     interactive: bool = False
+    inject_fault: str | None = None   # "s1_activity": append a fabricated ref after step 1 (guardrail demo)
     audit: Audit = field(init=False)
 
     def __post_init__(self):
@@ -176,6 +177,10 @@ def sequence(ctx: Context) -> str:
         if not _already_done(ctx, "s1_activity"):
             r = do_step(ctx, "s1_activity", prompts.s1(ctx.start, ctx.end))
             act_path.write_text(_strip_fences(r.text), encoding="utf-8")
+            if ctx.inject_fault == "s1_activity":
+                _inject_fabricated_ref(act_path)
+                ctx.audit.record("fault", "inject_s1_activity", "injected",
+                                 reason="appended a fabricated ticket ref to s1_activity.yaml (demo of g1 catching fabrication)")
         yaml_text = act_path.read_text(encoding="utf-8")
         cache_path = CACHE_DIR / f"{ctx.start}_{ctx.end}.json"
         cache = json.loads(cache_path.read_text()) if cache_path.exists() else None
@@ -253,6 +258,15 @@ def sequence(ctx: Context) -> str:
         return _finish(ctx, s.outcome, s.origin_step, s.reason)
 
 
+def _inject_fabricated_ref(act_path: Path) -> None:
+    """Fault injection for the guardrail demo: add a ticket that the gathered data
+    never contained to the first day, exactly what a hallucinating step would do."""
+    import yaml as _yaml
+    doc = _yaml.safe_load(act_path.read_text(encoding="utf-8"))
+    doc["days"][0].setdefault("items", []).append({"ref": "agentic-org#99999", "title": "Fabricated item for guardrail demo"})
+    act_path.write_text(_yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
 def _plan_table(plan: dict) -> str:
     rows = ["| Day | Entry | Hours | Comment |", "|---|---|---|---|"]
     for e in plan.get("entries", []):
@@ -313,8 +327,13 @@ def main(argv=None) -> int:
     p.add_argument("--resume", metavar="RUN_ID")
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--runs-dir", default=str(RUNS_DIR))
+    p.add_argument("--inject-fault", choices=["s1_activity"],
+                   help="tamper with a step's output on purpose to demonstrate the guardrail catching it")
     args = p.parse_args(argv)
     ctx = build_context(args)
+    ctx.inject_fault = args.inject_fault
+    if ctx.inject_fault:
+        ctx.mode = f"fault-injection:{ctx.inject_fault}"
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
     _log(f"run {ctx.run_id}  week {ctx.start}..{ctx.end}  hours '{ctx.hours}'  mode={ctx.mode}  dir={ctx.run_dir}")
     outcome = sequence(ctx)

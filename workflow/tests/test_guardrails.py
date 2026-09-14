@@ -139,6 +139,11 @@ def test_entry_passes_and_fails():
     assert not check_entry(p, missing).passed
 
 
+def test_entry_surfaces_step_error():
+    r = check_entry(plan([e("2026-09-14", "Mon", "Reg", 8)]), {"entries": [], "totals": {}, "error": "LOGIN REQUIRED"})
+    assert not r.passed and "LOGIN REQUIRED" in r.reason
+
+
 # ---- g4 -------------------------------------------------------------------
 
 def test_message_passes_modulo_whitespace_and_fails_on_change():

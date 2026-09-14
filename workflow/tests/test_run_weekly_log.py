@@ -164,3 +164,12 @@ def test_build_context_test_mode_and_resume(tmp_path, monkeypatch):
     args2 = argparse.Namespace(resume=ctx.run_id, model="m", runs_dir=str(tmp_path))
     ctx2 = h.build_context(args2, today=date(2026, 9, 13))
     assert (ctx2.start, ctx2.hours, ctx2.mode, ctx2.dry_run) == (ctx.start, ctx.hours, "test", True)
+
+
+def test_inject_fault_s1_is_caught_by_g1(tmp_path):
+    runner = FakeRunner()
+    ctx = make_ctx(tmp_path, runner, cache=CACHE, inject_fault="s1_activity")
+    assert h.sequence(ctx) == h.FAILED
+    recs = read_audit(ctx.run_dir)
+    assert [r["id"] for r in recs] == ["s1_activity", "inject_s1_activity", "g1_activity_check", "r1"]
+    assert recs[-1]["origin_step"] == "s1_activity" and "agentic-org#99999" in recs[-1]["reason"]

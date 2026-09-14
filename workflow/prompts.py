@@ -22,7 +22,10 @@ def s2a(hours: str, week_start: str, activity_path: Path | None, out: Path, toda
 def s2b(plan_path: Path, out: Path) -> str:
     return (HARNESS_NOTE + f"/workday-timelogger --enter-only {plan_path} --out {out}\n"
             "Write the JSON result file with a shell heredoc (cat > file <<'EOF' ... EOF). "
-            "If Workday needs an interactive SSO login, stop and report 'LOGIN REQUIRED'.")
+            "Workday always shows its 'Sign In to Your Account' page first: click the 'Single Sign-on' link "
+            "once and wait ~10s; the persisted Microsoft session normally completes the login by itself. "
+            "Only if the page then asks for a username, password or MFA code, write the result file with "
+            "\"error\": \"LOGIN REQUIRED\" and stop.")
 
 
 def s2c() -> str:

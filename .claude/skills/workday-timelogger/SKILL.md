@@ -101,7 +101,13 @@ npx @playwright/cli@latest -s=workday open "https://wd5.myworkday.com/improving/
 
 Snapshot the page to check login state. If redirected to a login page, click the "Single Sign-on" link. If SSO requires manual authentication (Okta, Azure AD, etc.), tell the user to complete it in the Chrome window and wait for confirmation.
 
-Once logged in (page title is "Workday improving" and the home dashboard is visible), navigate to Enter My Time via the **Search Workday** combobox in the top banner — this is more reliable than the side Menu shortcut (which is often outside the viewport and silently fails to click).
+Once logged in (page title is "Workday improving" and the home dashboard is visible), navigate to Enter My Time via the **Search Workday** combobox in the top banner.
+
+**Two rules that prevent the most common self-inflicted failures (both seen in real runs):**
+
+1. **NEVER open a deep-link task URL** (e.g. `/d/task/2998$10895.htmld`). Even when you are already logged in, deep-linking drops you onto a fresh Microsoft SAML sign-in page that asks for a username, and you will wrongly conclude "login required". Always reach Enter My Time by clicking inside the app (Search combobox → result). If you ever land on a `login.microsoftonline.com` or `wd5-identity` page *after* having reached the dashboard, you broke the session by navigating away — go back to `https://wd5.myworkday.com/improving/d/home.htmld` (the home URL only) and click the "Single Sign-on" link once.
+
+2. **The "Menu" / "Shortcuts" side dialog after login is rendered off-screen (negative x) and is inert — it does NOT actually block clicks.** Do not waste turns pressing Escape, clicking its Close/X, or clicking "Menu" to dismiss it. Ignore it: take one fresh `snapshot`, then click the **Search Workday** combobox by its *current* ref, type `enter my time`, and click the "Enter My Time" result.
 
 1. Click the "Search Workday" combobox in the banner.
 2. Snapshot — if "Enter My Time" already appears in the dropdown under **Recent Searches** (it will after the first run, since the persistent session retains history), click it directly. Otherwise type `enter my time` to trigger the search dropdown.

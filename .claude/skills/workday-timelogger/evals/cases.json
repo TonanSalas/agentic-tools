@@ -1,0 +1,150 @@
+{
+  "name": "workday-timelogger",
+  "cases": [
+    {
+      "name": "plan-only-split-day-with-activity",
+      "inputs": "/workday-timelogger --plan-only --hours \"Mon 11, Tue 8\" --week-start 2026-08-10 --activity .claude/skills/workday-timelogger/evals/fixtures/activity-2026-08-10.yaml --today 2026-08-15 --out /tmp/wl-eval-split.json",
+      "metadata": {
+        "why": "An 11h Monday must split 8+3 with tickets distributed, Tuesday's comment must fall back to refs-only because the titles overflow 255 chars. Grades the file the harness would consume."
+      },
+      "evaluators": [
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "plan_entries.py",
+              "2026-08-10",
+              "--activity"
+            ]
+          }
+        },
+        {
+          "NoCommandContaining": {
+            "forbidden": [
+              "-s=workday"
+            ]
+          }
+        },
+        {
+          "PlanMatches": {
+            "plan_path": "/tmp/wl-eval-split.json",
+            "expected_entries": [
+              {
+                "date": "2026-08-10",
+                "entry": "Reg",
+                "hours": 8,
+                "comment": "agentic-org#1468: Move carrier capture kits to Google Drive; point the skill at the symlink, insurance_portal#59: the v2 BOP quote workflow as a no-network mock, insurance_portal#60: recover the missing stylesheets, and fix the Login gate they were hiding"
+              },
+              {
+                "date": "2026-08-10",
+                "entry": "Extra",
+                "hours": 3,
+                "comment": "insurance_portal#61: DRA-563: Hartford WC mock + move carrier capture kits to Google Drive"
+              },
+              {
+                "date": "2026-08-11",
+                "entry": "Reg",
+                "hours": 8,
+                "comment": "agentic-org#1468, agentic-org#1469, insurance_portal#61, insurance_portal#62, insurance_portal#63, insurance_portal#65"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "plan-only-future-week-placeholder",
+      "inputs": "/workday-timelogger --plan-only --hours \"Mon 8\" --week-start 2027-08-02 --today 2026-09-13 --out /tmp/wl-eval-future.json",
+      "metadata": {
+        "why": "A future week has no activity: the skill must not call weekly-activity or invent tickets; the comment is the literal placeholder."
+      },
+      "evaluators": [
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "plan_entries.py",
+              "2027-08-02"
+            ]
+          }
+        },
+        {
+          "NoCommandContaining": {
+            "forbidden": [
+              "gather_activity.py"
+            ]
+          }
+        },
+        {
+          "NoCommandContaining": {
+            "forbidden": [
+              "-s=workday"
+            ]
+          }
+        },
+        {
+          "PlanMatches": {
+            "plan_path": "/tmp/wl-eval-future.json",
+            "expected_entries": [
+              {
+                "date": "2027-08-02",
+                "entry": "Reg",
+                "hours": 8,
+                "comment": "Activity placeholder"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "natural-language-plan-tables",
+      "inputs": "Plan my Workday time entries for the week starting Aug 10 2026: 11 hours Monday and 8 hours Tuesday. Use the activity file at .claude/skills/workday-timelogger/evals/fixtures/activity-2026-08-10.yaml (today is Aug 15 2026). Just show me the plan tables, do not open the browser or enter anything. Write the plan to /tmp/wl-eval-nl.json.",
+      "metadata": {
+        "why": "Same data phrased in prose: the skill has to recognise plan-only intent, run the planner, and present the two tables in the documented shape."
+      },
+      "evaluators": [
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "plan_entries.py",
+              "2026-08-10"
+            ]
+          }
+        },
+        {
+          "NoCommandContaining": {
+            "forbidden": [
+              "-s=workday"
+            ]
+          }
+        },
+        {
+          "PlanMatches": {
+            "plan_path": "/tmp/wl-eval-nl.json",
+            "expected_entries": [
+              {
+                "date": "2026-08-10",
+                "entry": "Reg",
+                "hours": 8
+              },
+              {
+                "date": "2026-08-10",
+                "entry": "Extra",
+                "hours": 3
+              },
+              {
+                "date": "2026-08-11",
+                "entry": "Reg",
+                "hours": 8
+              }
+            ]
+          }
+        },
+        {
+          "ClaudeCLIJudge": {
+            "rubric": "Grade the response text only.\n\nFAIL if any rule is violated:\n1. It contains TWO markdown tables. The first has one column each for the day (or date), the entry type (Reg/Extra), the hours, and the comment (a column named Comment, Tickets or similar counts). The second has one column for the issue ref and one for its title (header names may vary).\n2. The first table has exactly three data rows: Monday Reg 8, Monday Extra 3, Tuesday Reg 8 (dates may be rendered as 'Mon 08/10' or similar).\n3. Every Comment cell is non-empty.\n4. The second table lists at least four distinct issue refs of the form repo#number.\n5. The response does not claim that anything was entered, submitted or opened in Workday, and does not report a browser being launched."
+          }
+        }
+      ]
+    }
+  ]
+}

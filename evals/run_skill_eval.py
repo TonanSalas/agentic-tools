@@ -136,7 +136,7 @@ def run_claude_headless(prompt: str, model: str) -> tuple[str, list[dict]]:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=900,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed (exit {proc.returncode}): {proc.stderr[-2000:]}")
@@ -371,7 +371,91 @@ class ClaudeCLIJudge(Evaluator[str, str]):
         return EvaluationReason(value=match.group(1).upper() == "PASS", reason=result_text.strip())
 
 
-CUSTOM_EVALUATORS = [ScriptExecuted, DayCoverage, GroundedIdentifiers, ClaudeCLIJudge]
+@dataclass
+class PlanMatches(Evaluator[str, str]):
+    """Did the turn write the plan file the case expects? (workday-timelogger)
+
+    Deterministic: the expectation is literal data in cases.json. Compares the
+    (date, entry, hours) sequence exactly, and the comment text wherever the
+    case states one. The file is what the next workflow step consumes, so it is
+    the thing to grade -- not the prose tables the turn prints alongside it.
+    """
+
+    plan_path: str = ""
+    expected_entries: list[dict] = field(default_factory=list)
+    evaluation_name: str = "plan_matches"
+
+    def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
+        path = Path(self.plan_path)
+        if not path.exists():
+            return EvaluationReason(value=False, reason=f"plan file not written: {path}")
+        try:
+            plan = json.loads(path.read_text())
+        except json.JSONDecodeError as e:
+            return EvaluationReason(value=False, reason=f"plan file is not JSON: {e}")
+        got = [(e.get("date"), e.get("entry"), e.get("hours")) for e in plan.get("entries", [])]
+        want = [(e["date"], e["entry"], e["hours"]) for e in self.expected_entries]
+        if got != want:
+            return EvaluationReason(value=False, reason=f"entries {got} != expected {want}")
+        for e, g in zip(self.expected_entries, plan["entries"]):
+            if "comment" in e and e["comment"] != g.get("comment"):
+                return EvaluationReason(
+                    value=False,
+                    reason=f"{e['date']} {e['entry']} comment {g.get('comment')!r} != {e['comment']!r}",
+                )
+        return EvaluationReason(value=True, reason=f"{len(want)} entries match")
+
+
+@dataclass
+class NoCommandContaining(Evaluator[str, str]):
+    """Negative mechanism check: no successful command contained ALL of these
+    substrings. The inverse of ScriptExecuted, for cases whose correct
+    behaviour is to NOT act (a dry run must not click Send)."""
+
+    forbidden: list[str] = field(default_factory=list)
+    evaluation_name: str = "no_command_containing"
+
+    def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
+        commands = ctx.attributes.get("ran_commands") or []
+        for cmd in commands:
+            if all(sub in cmd for sub in self.forbidden):
+                return EvaluationReason(value=False, reason=f"forbidden command ran: {cmd[:160]}")
+        return EvaluationReason(value=True, reason=f"no command contained all of {self.forbidden}")
+
+
+@dataclass
+class AuditOutcome(Evaluator[str, str]):
+    """Workflow-level check (weekly-log): the newest run directory under
+    `runs_dir` must carry a `run` record with the expected outcome, and -- when
+    stated -- the expected origin step. Reads the harness's own audit log, which
+    is the artifact the workflow exists to produce."""
+
+    runs_dir: str = "workflow/runs"
+    expected_outcome: str = "success"
+    expected_origin_step: str | None = None
+    evaluation_name: str = "audit_outcome"
+
+    def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
+        root = Path(self.runs_dir)
+        if not root.is_absolute():
+            root = REPO_ROOT / root
+        run_dirs = sorted(d for d in root.glob("*") if (d / "audit.jsonl").exists())
+        if not run_dirs:
+            return EvaluationReason(value=False, reason=f"no run with audit.jsonl under {root}")
+        latest = run_dirs[-1]
+        records = [json.loads(l) for l in (latest / "audit.jsonl").read_text().splitlines() if l.strip()]
+        run_rec = next((r for r in records if r.get("kind") == "run"), None)
+        if run_rec is None:
+            return EvaluationReason(value=False, reason=f"{latest.name}: no run record (harness did not finish)")
+        if run_rec.get("outcome") != self.expected_outcome:
+            return EvaluationReason(value=False, reason=f"{latest.name}: outcome {run_rec.get('outcome')!r} != {self.expected_outcome!r}")
+        if self.expected_origin_step and run_rec.get("origin_step") != self.expected_origin_step:
+            return EvaluationReason(value=False, reason=f"{latest.name}: origin_step {run_rec.get('origin_step')!r} != {self.expected_origin_step!r}")
+        return EvaluationReason(value=True, reason=f"{latest.name}: {run_rec.get('outcome')}")
+
+
+CUSTOM_EVALUATORS = [ScriptExecuted, DayCoverage, GroundedIdentifiers, ClaudeCLIJudge,
+                     PlanMatches, NoCommandContaining, AuditOutcome]
 
 
 # --------------------------------------------------------------------------
@@ -397,6 +481,9 @@ def main() -> None:
     parser.add_argument("skill", help="Skill directory name under .claude/skills/")
     parser.add_argument("--repeat", type=int, default=1, help="Times to repeat each case (default 1)")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model for the task turns and the judge (default {DEFAULT_MODEL})")
+    parser.add_argument("--concurrency", type=int, default=1,
+                        help="Cases run in parallel (default 1: browser-driving skills share one Playwright "
+                             "session per site and must not interleave)")
     args = parser.parse_args()
 
     cases_path = REPO_ROOT / ".claude" / "skills" / args.skill / "evals" / "cases.json"
@@ -432,7 +519,8 @@ def main() -> None:
     branch = get_git_branch()
     run_started = datetime.now(timezone.utc)
     run_name = f"{branch}_{run_started.strftime('%Y%m%d-%H%M%S')}"
-    report = dataset.evaluate_sync(make_task(args.model), name=run_name, repeat=args.repeat)
+    report = dataset.evaluate_sync(make_task(args.model), name=run_name, repeat=args.repeat,
+                                   max_concurrency=args.concurrency)
     run_ended = datetime.now(timezone.utc)
     # include_reasons matters: without it a failure prints as a bare "x" and the
     # only way to learn why is to open the Logfire trace. Every evaluator here

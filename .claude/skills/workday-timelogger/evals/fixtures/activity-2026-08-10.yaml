@@ -1,0 +1,66 @@
+range:
+  start: '2026-08-10'
+  end: '2026-08-14'
+days:
+- date: '2026-08-10'
+  items:
+  - ref: agentic-org#1468
+    title: Move carrier capture kits to Google Drive; point the skill at the symlink
+  - ref: insurance_portal#59
+    title: the v2 BOP quote workflow as a no-network mock
+  - ref: insurance_portal#60
+    title: recover the missing stylesheets, and fix the Login gate they were hiding
+  - ref: insurance_portal#61
+    title: 'DRA-563: Hartford WC mock + move carrier capture kits to Google Drive'
+  - ref: insurance_portal#662
+    title: '(unknown #662)'
+  summary: 5 items.
+- date: '2026-08-11'
+  items:
+  - ref: agentic-org#1468
+    title: Move carrier capture kits to Google Drive; point the skill at the symlink
+  - ref: agentic-org#1469
+    title: Rename skill to build-mock-portal (carrier → portal), and correct the _state
+      description
+  - ref: insurance_portal#61
+    title: 'DRA-563: Hartford WC mock + move carrier capture kits to Google Drive'
+  - ref: insurance_portal#62
+    title: 'Correct the _state description: recordings, and they do not sync'
+  - ref: insurance_portal#63
+    title: 'DRA-675: reproduce Hartford''s WC class component, and vendor the icon
+      font'
+  - ref: insurance_portal#65
+    title: make the reveals and the class-code picker actually drivable
+  - ref: insurance_portal#4970877
+    title: '(unknown #4970877)'
+  summary: 7 items.
+- date: '2026-08-12'
+  items:
+  - ref: agentic-org#1448
+    title: 'hartford-portal: a /run-quote eval against the Hartford mock''s GL flow'
+  - ref: agentic-org#1471
+    title: 'chubb-portal: a /run-quote eval against the Chubb mock''s BOP flow'
+  - ref: agentic-org#1473
+    title: 'rt-portal: a /run-quote eval against the RT mock''s Commercial Package
+      (GL + Property)'
+  - ref: agentic-org#4970877
+    title: '(unknown #4970877)'
+  - ref: insurance_portal#66
+    title: 'Add W7: RT''s Commercial Package (GL & Property) mock, and share the controls'
+  summary: 5 items.
+- date: '2026-08-13'
+  items:
+  - ref: agentic-org#1473
+    title: 'rt-portal: a /run-quote eval against the RT mock''s Commercial Package
+      (GL + Property)'
+  - ref: agentic-org#1476
+    title: the DocuSign sender is always the operator, enforced
+  summary: 2 items.
+- date: '2026-08-14'
+  items:
+  - ref: broker-assist#2520
+    title: withhold attachments over Close's 25MB limit instead of failing the write
+  - ref: insurance_portal#68
+    title: 'Add /sitemap: a visual route atlas of every mock route'
+  summary: 2 items.
+summary: <html><b>fixture</b></html>

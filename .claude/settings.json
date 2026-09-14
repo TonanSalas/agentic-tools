@@ -6,7 +6,23 @@
       "Bash(jq:*)",
       "Bash(npx:*)",
       "Skill(workday-timelogger)",
-      "Skill(weekly-activity)"
+      "Skill(weekly-activity)",
+      "Skill(teams-messenger)",
+      "Skill(weekly-log)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/require_sentinel.py",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

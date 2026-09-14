@@ -26,6 +26,8 @@ All browser automation uses Playwright CLI via the Bash tool with session `-s=te
 
 - **message**: The text to send (required)
 - **target**: Where to send it (optional, defaults to self-chat "Tonan Salas (You)")
+- **--message-file FILE**: read the message from this file instead of inline text (markdown or HTML). The `weekly-log` harness always passes the message this way.
+- **--dry-run**: do every step — navigate, convert, paste, verify the compose box — but do **not** click Send. Report `DRY RUN: message staged in <chat>, not sent`, then clear the compose box with `press "Meta+a"` followed by `press "Backspace"`.
   - Chat: Use the chat name as shown in the sidebar (e.g., "Isaura Parga Mora", "Dragonfly Team", "AI Coding Club")
   - Channel: Use "Team > Channel" format (e.g., "Improving > General", "MX-AGS > Estacionamiento")
 
@@ -69,37 +71,21 @@ Do NOT use `fill` — it produces plain, unformatted text. Instead, paste HTML v
 
 1. Snapshot the page to find the message input — look for `textbox "Type a message"`.
 2. Click the textbox to focus it.
-3. Convert the message to HTML. The caller may pass the message as HTML already, or as markdown. If markdown, convert to simple HTML:
-   - `# Heading` → `<b>Heading</b>`
-   - `## Subheading` → `<b>Subheading</b>`
-   - `**text**` → `<b>text</b>`
-   - `* item` → wrap consecutive bullets in `<ul><li>item</li>...</ul>`
-   - Blank lines → `<br>`
-   - Plain text lines → `<p>text</p>`
-
-4. Write the HTML to `/tmp/teams-msg-<slug>.html`.
-
-5. Use **Swift** to set the macOS clipboard as HTML (this is the only approach that works — `osascript` and Python `AppKit` do NOT set the HTML MIME type correctly):
+3. Write the message (markdown or HTML, exactly as given) to `/tmp/teams-msg-<slug>.md`, or use the `--message-file` path directly.
+4. Convert it and put it on the clipboard in one call. Never hand-convert markdown and never call Swift yourself — the script owns both (rules tested in `tests/test_to_teams_html.py`):
    ```bash
-   swift -e '
-   import AppKit
-   let html = try! String(contentsOfFile: "/tmp/teams-msg.html", encoding: .utf8)
-   let pb = NSPasteboard.general
-   pb.clearContents()
-   pb.setString(html, forType: .html)
-   '
+   python3 "<skill-directory>/scripts/to_teams_html.py" --in /tmp/teams-msg-<slug>.md --out /tmp/teams-msg-<slug>.html --clipboard
    ```
-
-6. Paste into the Teams compose box:
+   It prints the HTML it produced; keep a distinctive phrase from it for the checks below.
+5. Paste into the Teams compose box:
    ```bash
    npx @playwright/cli@latest -s=teams press "Meta+v"
    ```
    Note: `press` for keyboard shortcuts does NOT take an element ref — just the key combo.
-
-7. Snapshot once and grep within the `textbox "Type a message"` block specifically — never grep the whole snapshot, since the chat history above the compose box contains prior rich-text reports and will produce false positives. Use a context-aware grep like `grep -A 30 'textbox "Type a message"'` and check that a unique phrase from this message (today's date or a distinctive sentence) appears inside that block.
-
-8. Click the **Send** button (look for `button "Send (⌘ Return)"`).
-9. Snapshot once after send and confirm the same unique phrase now appears in a message bubble (outside the compose textbox).
+6. Snapshot once and grep within the `textbox "Type a message"` block specifically — never grep the whole snapshot, since the chat history above the compose box contains prior rich-text reports and will produce false positives. Use a context-aware grep like `grep -A 30 'textbox "Type a message"'` and check that the distinctive phrase appears inside that block.
+7. **Dry run?** If `--dry-run` was given, stop here: report `DRY RUN: message staged in <chat>, not sent`, clear the box (`press "Meta+a"` then `press "Backspace"`), and leave the browser open. Do not click Send.
+8. Click the **Send** button by role selector: `npx @playwright/cli@latest -s=teams click 'role=button[name="Send (⌘ Return)"]'`. Prefer this over a ref — the repo's sentinel hook recognises the committing click by its name (it also resolves refs against the latest snapshot). If the click is blocked by that hook, report the hook's message verbatim and stop; never retry with another selector, a ref, or a key combo.
+9. Snapshot once after send and confirm the same phrase now appears in a message bubble (outside the compose textbox).
 
 This whole flow should be ~6–7 tool calls total. Avoid extra snapshots between steps that already returned page state.
 

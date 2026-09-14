@@ -7,7 +7,7 @@ description: Gather GitHub activity across all dragonflyic repos for a this week
 
 ## Task
 
-Run `gather_activity.py`, then write a day-by-day summary of what the user did during that period.
+Run `gather_activity.py`, then write a summary of what the user did during that period.
 
 ## Context
 
@@ -24,8 +24,7 @@ python3 "<skill-directory>/scripts/gather_activity.py" --range this-week
 
 ## Output format
 
-Reply with exactly this YAML and nothing else. One `days` entry per date in the
-range.
+Reply with exactly this YAML and nothing else. One `days` entry per date in the range.
 
 ```yaml
 range:
@@ -42,4 +41,26 @@ days:
   - date: 2026-08-11
     items: []
     summary: Quiet day — no recorded activity.
+summary: |
+  <html>
+  <b>TEC Weekly Status Report – Dragonfly</b><br>
+  <b>Project:</b> Dragonfly<br>
+  <b>Date:</b> <!-- today's date, spelled out: April 11, 2026 --><br>
+  <b>Status:</b> <!-- 🟢 default · 🟡 notable risk · 🔴 critical blockers only --><br>
+  <br>
+  <b>Summary</b><br>
+  <!-- 2–4 sentences giving a high-level picture -->
+  <br>
+  <b>Accomplished</b>
+  <ul>
+  <!-- One <li> per ticket that is done. Rephrase raw titles into clear standalone accomplishments. Collapse 2+ tickets from the same effort into one line. Name the work, not the ticket. -->
+  </ul>
+  <b>Planned Activities</b>
+  <ul>
+  <!-- One <li> per remaining ticket — open PRs, open issues. Name the work, not the ticket. A ticket may also appear in Accomplished if partially closed but reopened for remaining work. -->
+  </ul>
+  <b>Risks</b><br>
+  <!-- Risks apparent from the data: blocked items, open security issues, critical blockers. If nothing stands out, write exactly: No risks identified at the moment. -->
+  <!-- Shoutouts: append `<br><br><b>Shoutouts</b><br>` and the text ONLY if the user explicitly mentioned a shoutout. Never fabricate one — omit the block entirely. -->
+  </html>
 ```

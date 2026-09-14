@@ -14,25 +14,47 @@ Usage:
     python3 evals/run_skill_eval.py weekly-activity
     python3 evals/run_skill_eval.py weekly-activity --repeat 3
 
-Real API cost is incurred per case per repeat (a trivial no-tool call
-measured ~$0.19 on Opus; the default model here is Haiku, which costs much
-less) — the estimate is printed before running, but nothing is gated behind
-a flag.
+Real API cost is incurred per case per repeat, for the task turns only —
+grading is free. The estimate is printed before running.
+
+**Grading is deterministic wherever the expectation can be stated literally.**
+`ScriptExecuted`, `DayCoverage` and `GroundedIdentifiers` take their
+expectations as data in `cases.json` and are pure matchers over that data —
+none of them derives what it expects at grading time.
+
+That property was arrived at the hard way and is recorded in
+`ITERATION_LOG.md`:
+
+- An earlier grounding check asked an LLM judge whether ticket numbers looked
+  real. It failed a correct response with "presents highly specific PR
+  numbers... I cannot verify are real" — penalising accuracy for looking
+  unverifiable.
+- Its replacement fetched the script's own payload at grading time and
+  compared against that. Deterministic, but circular: it asked "does the
+  response match what the script says now", not "does the response match the
+  truth". A regressed script would have taken the eval down with it and still
+  scored 100%.
+
+`ClaudeCLIJudge` is the one rubric-graded dimension, covering the expectation
+that cannot be written as a literal: the shape and prose of the TEC status
+report the skill emits under a top-level `summary` key. It follows the same
+contract as the other three — the expectation lives in `cases.json`, per case,
+and the evaluator only applies it. Its rubric is written per case because the
+cases differ in substance, not just in parameters: one week's Planned
+Activities are legitimately empty (everything merged), the next week's must
+name the PR still in review, and the future week must name no work at all.
+
+It is never asked whether anything is *real*: that is precisely what sank the
+first grounding judge, and it stays `GroundedIdentifiers`' job. Every rubric
+below grades only what is decidable from the response text itself.
 
 Tool calls the nested Claude session makes are parsed out of the
 --output-format stream-json output and re-emitted as local logfire spans
-inside the task function, because pydantic_evals' HasMatchingSpan (and other
-span-based evaluators) only see spans emitted in-process during the task
-call — a subprocess's own spans, exported straight to Logfire, aren't
-visible to the parent's local span tree. This replay is the only non-declar-
-ative code in the whole runner.
-
-Judging (rubric-based assertions) uses `ClaudeCLIJudge`, a small custom
-evaluator that shells out to `claude -p` the same way the task does, instead
-of pydantic_evals' built-in LLMJudge — LLMJudge needs a pydantic_ai model
-client with a real provider API key (OPENAI_API_KEY/ANTHROPIC_API_KEY),
-which this environment doesn't have. The CLI is already authenticated, so
-ClaudeCLIJudge needs no separate key at all.
+inside the task function, because span-based tooling only sees spans emitted
+in-process during the task call — a subprocess's own spans, exported straight
+to Logfire, aren't visible to the parent's local span tree. Only calls whose
+`tool_result` came back without an error are replayed, so a *blocked* or
+*failed* call can't be mistaken for a call that ran.
 """
 
 from __future__ import annotations
@@ -44,13 +66,13 @@ import re
 import subprocess
 import sys
 import urllib.parse
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import logfire
 from dotenv import load_dotenv
-from pydantic_evals import Dataset
+from pydantic_evals import Dataset, set_eval_attribute
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 from pydantic_evals.evaluators.evaluator import EvaluationReason
 
@@ -74,6 +96,288 @@ LOGFIRE_PROJECT = "tool-evals"
 EST_COST_PER_CASE_USD = 0.19
 
 
+# --------------------------------------------------------------------------
+# Task
+# --------------------------------------------------------------------------
+
+def logfire_trace_link(trace_id: str, since: datetime, until: datetime) -> str:
+    """A direct Logfire live-view link filtered to this run's trace, so you
+    don't have to navigate/refresh the Evals UI by hand to find it."""
+    query = urllib.parse.quote(f"trace_id='{trace_id}'")
+    since_s = urllib.parse.quote(since.isoformat())
+    until_s = urllib.parse.quote(until.isoformat())
+    return f"{LOGFIRE_BASE_URL}/{LOGFIRE_ORG}/{LOGFIRE_PROJECT}/?q={query}&since={since_s}&until={until_s}"
+
+
+def _span_name(tool_name: str, tool_input: dict) -> str:
+    # Summarize into the span name (not just attributes) so substring
+    # queries can match directly against what the tool actually did.
+    summary = tool_input.get("command") or tool_input.get("description") or json.dumps(tool_input)
+    # Strip braces so logfire doesn't try to treat the name as a template string.
+    summary = summary.replace("{", "(").replace("}", ")")
+    return f"{tool_name}({summary})"[:300]
+
+
+def run_claude_headless(prompt: str, model: str) -> tuple[str, list[dict]]:
+    """Run one headless Claude turn.
+
+    Returns (final_text, successful_tool_calls). A call counts as successful
+    only if its `tool_result` came back without `is_error` -- a call the
+    session merely *attempted* (blocked by permissions, or failed outright)
+    is not evidence that anything ran.
+    """
+    proc = subprocess.run(
+        # No --allowedTools: the tools the skill needs are pre-approved in the
+        # project's .claude/settings.json, so the nested session runs under the
+        # same permission config as real usage. With neither, it hits an
+        # interactive permission prompt it can't answer in headless mode and
+        # returns "I need approval to run..." -- grading a refusal, not a skill.
+        ["claude", "-p", prompt, "--model", model, "--output-format", "stream-json", "--verbose"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"claude -p failed (exit {proc.returncode}): {proc.stderr[-2000:]}")
+
+    final_text = ""
+    attempted: dict[str, dict] = {}
+    completed: list[str] = []
+
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if event.get("type") == "assistant":
+            for block in event.get("message", {}).get("content", []):
+                if block.get("type") == "tool_use":
+                    attempted[block.get("id", "")] = {
+                        "name": block.get("name", "tool"),
+                        "input": block.get("input", {}),
+                    }
+        elif event.get("type") == "user":
+            for block in event.get("message", {}).get("content", []):
+                if block.get("type") == "tool_result" and not block.get("is_error"):
+                    completed.append(block.get("tool_use_id", ""))
+        elif event.get("type") == "result":
+            final_text = event.get("result", final_text)
+
+    succeeded = [attempted[i] for i in completed if i in attempted]
+    return final_text, succeeded
+
+
+def make_task(model: str):
+    def task(inputs: str) -> str:
+        final_text, tool_calls = run_claude_headless(inputs, model)
+        for call in tool_calls:
+            with logfire.span(_span_name(call["name"], call["input"])):
+                pass
+        # The evaluators read this rather than re-deriving it from the span
+        # tree: it is the exact list of commands that actually ran.
+        set_eval_attribute("ran_commands", [
+            str(c["input"].get("command", "")) for c in tool_calls
+        ])
+        return final_text
+
+    return task
+
+
+# --------------------------------------------------------------------------
+# Evaluators -- three dimensions, all deterministic
+#
+# Each takes its expectations as constructor arguments supplied per case in
+# cases.json. None of them computes what it expects: an evaluator that derives
+# its own ground truth from the system under test cannot detect that system
+# regressing.
+# --------------------------------------------------------------------------
+
+@dataclass
+class ScriptExecuted(Evaluator[str, str]):
+    """Mechanism: did the turn actually run the tool it was supposed to?
+
+    `required_tool_calls` is a list of substrings that must ALL appear in one
+    single successful command -- so a case naming the script plus both dates
+    demands one call carrying all three, not three unrelated calls that happen
+    to mention them between them.
+
+    Substrings rather than exact commands because the absolute skill path
+    varies by checkout and the session quotes its arguments inconsistently.
+    """
+
+    required_tool_calls: list[str] = field(default_factory=list)
+    evaluation_name: str = "script_executed"
+
+    def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
+        commands = ctx.attributes.get("ran_commands") or []
+        for cmd in commands:
+            if all(sub in cmd for sub in self.required_tool_calls):
+                return EvaluationReason(value=True, reason=f"ran: {cmd[:160]}")
+        if not commands:
+            return EvaluationReason(value=False, reason="no tool call completed successfully")
+        missing = [s for s in self.required_tool_calls
+                   if not any(s in c for c in commands)]
+        return EvaluationReason(
+            value=False,
+            reason=(f"no single successful command contained all of "
+                    f"{self.required_tool_calls}"
+                    + (f"; never seen at all: {missing}" if missing else "")),
+        )
+
+
+@dataclass
+class DayCoverage(Evaluator[str, str]):
+    """Completeness: is every expected day present in the response?
+
+    Checks structure, not items. A day the script reports as empty still has
+    to appear -- silently dropping quiet days is the failure this catches, and
+    it is why the empty-window case is worth having.
+
+    Dates are matched in several notations because the response is prose:
+    2026-08-10, 08/10, 08-10, "Aug 10" and "August 10" all count. Matching a
+    single notation would fail correct answers over formatting.
+    """
+
+    expected_days: list[str] = field(default_factory=list)
+    evaluation_name: str = "day_coverage"
+
+    def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
+        output = ctx.output or ""
+        missing = [d for d in self.expected_days if not _mentions_date(output, d)]
+        if missing:
+            return EvaluationReason(
+                value=False,
+                reason=f"{len(missing)} of {len(self.expected_days)} days absent: {', '.join(missing)}",
+            )
+        return EvaluationReason(
+            value=True,
+            reason=f"all {len(self.expected_days)} expected days present",
+        )
+
+
+@dataclass
+class GroundedIdentifiers(Evaluator[str, str]):
+    """Grounding: are the ticket numbers exactly the ones that belong here?
+
+    Set equality against `expected_identifiers`, which makes this a two-sided
+    check with one comparison: a number not in the list is fabrication, and a
+    number in the list but absent from the response is compression -- a day
+    collapsed into "10 items including...". Both are failures, and neither
+    needs a judge to have an opinion.
+
+    Numbers are compared without their repo prefix. Responses write bare "#61"
+    when context makes the repo obvious, and demanding the prefix would fail
+    correct answers; the cost is that the same number in two repos is
+    indistinguishable here.
+    """
+
+    expected_identifiers: list[int] = field(default_factory=list)
+    evaluation_name: str = "grounded_identifiers"
+
+    def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
+        expected = set(self.expected_identifiers)
+        found = {int(n) for n in re.findall(r"#(\d+)", ctx.output or "")}
+
+        fabricated = found - expected
+        omitted = expected - found
+        if fabricated or omitted:
+            parts = []
+            if fabricated:
+                parts.append(f"{len(fabricated)} not expected ({_preview(fabricated)})")
+            if omitted:
+                parts.append(f"{len(omitted)} expected but missing ({_preview(omitted)})")
+            return EvaluationReason(value=False, reason="; ".join(parts))
+
+        if not expected:
+            return EvaluationReason(value=True, reason="nothing expected and no identifiers invented")
+        return EvaluationReason(value=True, reason=f"all {len(expected)} expected ticket numbers present, none extra")
+
+
+def _mentions_date(text: str, iso: str) -> bool:
+    d = date.fromisoformat(iso)
+    variants = [
+        iso,
+        f"{d.month:02d}/{d.day:02d}",
+        f"{d.month:02d}-{d.day:02d}",
+        f"{d.strftime('%b')} {d.day}",
+        f"{d.strftime('%B')} {d.day}",
+    ]
+    return any(v.lower() in text.lower() for v in variants)
+
+
+def _preview(numbers: set[int], limit: int = 5) -> str:
+    ordered = sorted(numbers)
+    shown = ", ".join(f"#{n}" for n in ordered[:limit])
+    return shown + (f", +{len(ordered) - limit} more" if len(ordered) > limit else "")
+
+
+_JUDGE_VERDICT_RE = re.compile(r"^\s*(PASS|FAIL)\b", re.IGNORECASE)
+
+
+@dataclass
+class ClaudeCLIJudge(Evaluator[str, str]):
+    """Rubric judging of the TEC report, via the authenticated `claude` CLI.
+
+    The only non-deterministic evaluator here. It exists because the report's
+    contract is a *shape* -- section order, real `<ul>` lists, synthesising
+    prose, no leftover template comments -- and a shape is not a literal any
+    matcher can hold.
+
+    The rubric is supplied per case rather than shared, for the same reason
+    every other expectation in this suite is: the cases differ in what a
+    correct answer contains, not merely in a parameter. A shared rubric would
+    have to be written vaguely enough to pass all three, which is how an eval
+    stops measuring.
+
+    An alternative to pydantic_evals' built-in LLMJudge, which needs a
+    pydantic_ai client backed by a provider API key. This shells out the same
+    way the task does, reusing the CLI's existing auth.
+    """
+
+    rubric: str = ""
+    model: str = DEFAULT_MODEL
+    evaluation_name: str = "tec_report"
+
+    async def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
+        judge_prompt = (
+            "You are grading whether a response satisfies a rubric. "
+            "Do not use any tools -- just reply directly.\n\n"
+            f"Rubric:\n{self.rubric}\n\n"
+            f"Response to grade:\n{ctx.output}\n\n"
+            "Reply with exactly one line starting with PASS or FAIL, then one "
+            "sentence naming the first rule violated."
+        )
+        proc = subprocess.run(
+            ["claude", "-p", judge_prompt, "--model", self.model, "--output-format", "json"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if proc.returncode != 0:
+            return EvaluationReason(value=False, reason=f"judge call failed (exit {proc.returncode}): {proc.stderr[-500:]}")
+        try:
+            result_text = json.loads(proc.stdout).get("result", "")
+        except json.JSONDecodeError:
+            return EvaluationReason(value=False, reason=f"judge returned non-JSON: {proc.stdout[:300]}")
+        match = _JUDGE_VERDICT_RE.match(result_text)
+        if not match:
+            return EvaluationReason(value=False, reason=f"judge reply didn't start with PASS/FAIL: {result_text[:300]}")
+        return EvaluationReason(value=match.group(1).upper() == "PASS", reason=result_text.strip())
+
+
+CUSTOM_EVALUATORS = [ScriptExecuted, DayCoverage, GroundedIdentifiers, ClaudeCLIJudge]
+
+
+# --------------------------------------------------------------------------
+# Entry point
+# --------------------------------------------------------------------------
+
 def get_git_branch() -> str:
     try:
         out = subprocess.run(
@@ -88,162 +392,31 @@ def get_git_branch() -> str:
         return "unknown-branch"
 
 
-def logfire_trace_link(trace_id: str, since: datetime, until: datetime) -> str:
-    """A direct Logfire live-view link filtered to this run's trace, so you
-    don't have to navigate/refresh the Evals UI by hand to find it."""
-    query = urllib.parse.quote(f"trace_id='{trace_id}'")
-    since_s = urllib.parse.quote(since.isoformat())
-    until_s = urllib.parse.quote(until.isoformat())
-    return f"{LOGFIRE_BASE_URL}/{LOGFIRE_ORG}/{LOGFIRE_PROJECT}/?q={query}&since={since_s}&until={until_s}"
-
-
-def _span_name(tool_name: str, tool_input: dict) -> str:
-    # Summarize into the span name (not just attributes) so substring
-    # queries like HasMatchingSpan({"name_contains": "..."}) can match
-    # directly against what the tool actually did, e.g. the Bash command.
-    summary = tool_input.get("command") or tool_input.get("description") or json.dumps(tool_input)
-    # Strip braces so logfire doesn't try to treat the name as a template string.
-    summary = summary.replace("{", "(").replace("}", ")")
-    return f"{tool_name}({summary})"[:300]
-
-
-def run_claude_headless(prompt: str, model: str) -> tuple[str, list[dict]]:
-    """Run one headless Claude turn. Returns (final_text, tool_calls)."""
-    proc = subprocess.run(
-        ["claude", "-p", prompt, "--model", model, "--output-format", "stream-json", "--verbose"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"claude -p failed (exit {proc.returncode}): {proc.stderr[-2000:]}")
-
-    final_text = ""
-    tool_calls: list[dict] = []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if event.get("type") == "assistant":
-            for block in event.get("message", {}).get("content", []):
-                if block.get("type") == "tool_use":
-                    tool_calls.append({"name": block.get("name", "tool"), "input": block.get("input", {})})
-        elif event.get("type") == "result":
-            final_text = event.get("result", final_text)
-
-    return final_text, tool_calls
-
-
-def make_task(model: str):
-    def task(inputs: str) -> str:
-        final_text, tool_calls = run_claude_headless(inputs, model)
-        for call in tool_calls:
-            with logfire.span(_span_name(call["name"], call["input"])):
-                pass
-        return final_text
-
-    return task
-
-
-_JUDGE_VERDICT_RE = re.compile(r"^\s*(PASS|FAIL)\b", re.IGNORECASE)
-
-
-@dataclass
-class ClaudeCLIJudge(Evaluator[str, str]):
-    """Rubric-based judging via the authenticated `claude` CLI — no API key needed.
-
-    A drop-in alternative to pydantic_evals' built-in LLMJudge, which requires
-    a pydantic_ai model client backed by a real provider API key. This shells
-    out the same way the task itself does, so it reuses the CLI's existing
-    auth instead of asking for a separate credential.
-
-    Set `use_expected_output` to hand the judge the case's `expected_output`
-    alongside the rubric. That is what lets one dataset-level judge grade every
-    case: the rubric stays identical across cases and the per-case specifics
-    (which date range, which output format) live in the case data instead of in
-    a bespoke per-case rubric.
-
-    `evaluation_name` is a field rather than a constant because pydantic_evals
-    names an evaluator's column after it -- two judge instances on the same
-    dataset need distinct names or they collide in the report.
-    """
-
-    rubric: str = ""
-    model: str = DEFAULT_MODEL
-    evaluation_name: str = "ClaudeCLIJudge"
-    use_expected_output: bool = False
-
-    async def evaluate(self, ctx: EvaluatorContext[str, str]) -> EvaluationReason:
-        expected = ""
-        if self.use_expected_output and ctx.expected_output:
-            expected = (
-                "\nFor this case, the response was expected to be:\n"
-                f"{ctx.expected_output}\n"
-                "Grade the rubric against that expectation. It describes what the "
-                "response should convey, not wording it must copy.\n"
-            )
-        judge_prompt = (
-            "You are grading whether a response satisfies a rubric. "
-            "Do not use any tools -- just reply directly.\n\n"
-            f"Rubric: {self.rubric}\n"
-            f"{expected}\n"
-            f"Response to grade:\n{ctx.output}\n\n"
-            "Reply with exactly one line starting with PASS or FAIL, "
-            "followed by a one-sentence reason."
-        )
-        proc = subprocess.run(
-            ["claude", "-p", judge_prompt, "--model", self.model, "--output-format", "json"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if proc.returncode != 0:
-            return EvaluationReason(value=False, reason=f"judge call failed (exit {proc.returncode}): {proc.stderr[-500:]}")
-
-        try:
-            result_text = json.loads(proc.stdout).get("result", "")
-        except json.JSONDecodeError:
-            return EvaluationReason(value=False, reason=f"judge returned non-JSON output: {proc.stdout[:300]}")
-
-        match = _JUDGE_VERDICT_RE.match(result_text)
-        if not match:
-            return EvaluationReason(value=False, reason=f"judge reply didn't start with PASS/FAIL: {result_text[:300]}")
-
-        return EvaluationReason(value=match.group(1).upper() == "PASS", reason=result_text.strip())
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("skill", help="Skill directory name under .claude/skills/")
     parser.add_argument("--repeat", type=int, default=1, help="Times to repeat each case (default 1)")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model for both the task and the judge (default {DEFAULT_MODEL})")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model for the task turns and the judge (default {DEFAULT_MODEL})")
     args = parser.parse_args()
 
     cases_path = REPO_ROOT / ".claude" / "skills" / args.skill / "evals" / "cases.json"
     if not cases_path.exists():
         sys.exit(f"No eval cases found at {cases_path}")
 
-    dataset = Dataset.from_file(cases_path, custom_evaluator_types=[ClaudeCLIJudge])
-    # Judges live at dataset level (shared by every case), but a case may still
-    # carry its own -- point both at the requested model.
-    all_evaluators = list(dataset.evaluators)
+    dataset = Dataset.from_file(cases_path, custom_evaluator_types=CUSTOM_EVALUATORS)
+
+    # Three evaluators need no model; the judge does. Every evaluator is
+    # attached per case, so that is the only place to look.
     for case in dataset.cases:
-        all_evaluators.extend(case.evaluators)
-    for evaluator in all_evaluators:
-        if isinstance(evaluator, ClaudeCLIJudge):
-            evaluator.model = args.model
+        for evaluator in case.evaluators:
+            if isinstance(evaluator, ClaudeCLIJudge):
+                evaluator.model = args.model
 
     n_cases = len(dataset.cases)
     est_total = n_cases * args.repeat * EST_COST_PER_CASE_USD
     print(
         f"Running {n_cases} case(s) x {args.repeat} repeat(s) for '{args.skill}' on {args.model} "
-        f"-- estimated cost: ~${est_total:.2f} floor (prompts with tool use cost more)"
+        f"-- estimated cost: ~${est_total:.2f} floor (three evaluators are free; the judge costs one turn per case)"
     )
 
     if os.environ.get("LOGFIRE_TOKEN"):
@@ -261,7 +434,10 @@ def main() -> None:
     run_name = f"{branch}_{run_started.strftime('%Y%m%d-%H%M%S')}"
     report = dataset.evaluate_sync(make_task(args.model), name=run_name, repeat=args.repeat)
     run_ended = datetime.now(timezone.utc)
-    report.print(include_input=False, include_output=False)
+    # include_reasons matters: without it a failure prints as a bare "x" and the
+    # only way to learn why is to open the Logfire trace. Every evaluator here
+    # returns a reason naming the specific dates or numbers at fault.
+    report.print(include_input=False, include_output=False, include_reasons=True)
 
     if os.environ.get("LOGFIRE_TOKEN") and report.trace_id:
         print(f"\nView this run in Logfire: {logfire_trace_link(report.trace_id, run_started, run_ended)}")

@@ -9,8 +9,7 @@ This README doubles as a **replication guide**: if you're Claude Code running on
 | Skill | What it does |
 |-------|--------------|
 | `/workday-timelogger` | Gathers GitHub activity, builds an entry plan, then fills the Workday timesheet via browser automation. |
-| `/weekly-activity` | Auto-discovers active `dragonflyic` repos and reports commits/PRs/issues for a date range (Python + `gh`). |
-| `/weekly-report` | Reorganizes activity by project into a status report and optionally posts it to Teams. |
+| `/weekly-activity` | Auto-discovers active `dragonflyic` repos and reports commits/PRs/issues for a date range (Python + `gh`), plus a TEC status report as Teams-ready HTML. |
 | `/teams-messenger` | Sends a (rich-text) message to a Teams chat or channel via browser automation. |
 
 Each skill lives in `.claude/skills/<name>/SKILL.md`. Read those files — they are the authoritative, battle-tested versions. This README explains the *reusable patterns* behind them.
@@ -156,7 +155,7 @@ Full implementation: [`.claude/skills/teams-messenger/SKILL.md`](.claude/skills/
 
 6. **Fallback:** if rich paste doesn't render, `fill` the plain text and tell the user formatting was lost.
 
-**Run it cheaply as a sub-skill.** This skill is a deterministic recipe with no reasoning. When another skill (e.g. `weekly-report`) calls it non-interactively, launch it via the **`Agent` tool with `model: "claude-haiku-4-5-20251001"`** to save tokens. (Note: `model:` frontmatter on a skill is *not* honored by the current loader — skills run in the parent's context — so the Agent route is the only way to actually downshift.)
+**Run it cheaply as a sub-skill.** This skill is a deterministic recipe with no reasoning. When another skill (e.g. `workday-timelogger`) calls it non-interactively, launch it via the **`Agent` tool with `model: "claude-haiku-4-5-20251001"`** to save tokens. (Note: `model:` frontmatter on a skill is *not* honored by the current loader — skills run in the parent's context — so the Agent route is the only way to actually downshift.)
 
 ---
 

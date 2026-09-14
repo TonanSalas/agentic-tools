@@ -2,46 +2,159 @@
   "name": "weekly-activity",
   "cases": [
     {
-      "name": "default-range-natural-language",
-      "inputs": "What did I work on this week? Give me my GitHub activity.",
-      "metadata": null,
-      "expected_output": "A per-day breakdown of the current week (Monday through today), one entry per day, derived from gather_activity.py's output rather than written from memory."
-    },
-    {
-      "name": "explicit-closed-week-range",
+      "name": "populated-week-slash-command",
       "inputs": "/weekly-activity 2026-08-10..2026-08-14",
-      "metadata": null,
-      "expected_output": "A per-day breakdown covering exactly 2026-08-10 through 2026-08-14 (Mon 08/10 to Fri 08/14), one entry per day, with both boundary dates stated."
-    },
-    {
-      "name": "yaml-output-contract",
-      "inputs": "What did I work on between 2026-08-03 and 2026-08-07?",
-      "metadata": null,
-      "expected_output": "A YAML document with a top-level `range` (start/end) and one `days` entry per date in 2026-08-03..2026-08-07, each with `items` (ref + title, drawn from gather_activity.py's output) and a one-sentence `summary` grounded in those items — not free-form prose."
-    }
-  ],
-  "evaluators": [
-    {
-      "HasMatchingSpan": {
-        "query": {
-          "name_contains": "gather_activity.py"
+      "metadata": {
+        "window": "2026-08-10..2026-08-14",
+        "why": "Mon-Fri, three repos, every day populated. The main case: the whole payload has to survive into the response."
+      },
+      "evaluators": [
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "gather_activity.py",
+              "2026-08-10",
+              "2026-08-14"
+            ]
+          }
         },
-        "evaluation_name": "ran_skill_script"
-      }
+        {
+          "DayCoverage": {
+            "expected_days": [
+              "2026-08-10",
+              "2026-08-11",
+              "2026-08-12",
+              "2026-08-13",
+              "2026-08-14"
+            ]
+          }
+        },
+        {
+          "GroundedIdentifiers": {
+            "expected_identifiers": [
+              59,
+              60,
+              61,
+              62,
+              63,
+              65,
+              66,
+              68,
+              1448,
+              1468,
+              1469,
+              1471,
+              1473,
+              1476,
+              2520
+            ]
+          }
+        },
+        {
+          "ClaudeCLIJudge": {
+            "rubric": "Grade ONLY the top-level `summary:` key at the end of the response -- the TEC weekly\nstatus report, written as HTML. Judge nothing else in the response.\n\nDecide every point from the text in front of you. Do NOT consider whether any repository,\nticket, person or piece of work is real: you cannot check that, it is graded elsewhere, and\na response must never be penalised for being specific.\n\nFAIL if the `summary:` key is missing or does not hold HTML. Otherwise FAIL if any rule\nbelow is violated.\n\nFORM\n1. Carries, in this order: `<b>TEC Weekly Status Report - Dragonfly</b>`, `<b>Project:</b>`,\n   `<b>Date:</b>`, `<b>Status:</b>`, `<b>Summary</b>`, `<b>Accomplished</b>`,\n   `<b>Planned Activities</b>`, `<b>Risks</b>`. An enclosing `<html>` wrapper is fine and\n   must NOT be penalised.\n2. No `<!-- ... -->` template comments survive.\n3. `Date:` reads August 14, 2026, in any unambiguous rendering. This is the last day of the reported\n   window, NOT the day the report was written. Any other date FAILS.\n4. `Status:` is exactly one of the green, yellow or red circle emoji.\n5. No ticket numbers anywhere in the report: no `#123`, no `repo#123`, no `DRA-1234`. Work\n   must be described in plain words, with feat:/fix:/chore: prefixes dropped.\n6. `Risks` either names a concrete risk or reads exactly \"No risks identified at the moment.\"\n7. A Shoutouts block appears only if the request asked for one. This request did not, so any\n   Shoutouts block FAILS.\n\nCONTENT -- the week of 2026-08-10..14\n8. `Accomplished` is a real `<ul>` with `<li>` children -- `<br>`-separated prose, markdown\n   or `*` bullets FAIL -- and covers at least FIVE of these seven distinct threads:\n   - a v2 BOP quote workflow mock, incl. recovering missing stylesheets / the Login gate\n   - the Hartford workers-comp mock: class component, vendored icon font, drivable reveals\n     and class-code picker\n   - /run-quote evals against three carrier mocks: Hartford GL, Chubb BOP, RT Commercial\n     Package (GL + Property)\n   - moving carrier capture kits to Google Drive, and renaming the build-mock-portal skill\n   - enforcing that the DocuSign sender is always the operator\n   - withholding Close attachments over the 25MB limit instead of failing the write\n   - a /sitemap visual route atlas of every mock route\n   Threads may be merged into one `<li>`; count a thread as covered if its substance appears\n   anywhere in the list.\n9. Every ticket in this window merged, so `Planned Activities` SHOULD be empty. An empty\n   `<ul>`, or a short statement that no open work remains, both PASS. Naming any specific\n   open work or in-review PR FAILS -- there is none in this window.\n10. `Summary` is 2 to 4 complete sentences synthesising the week's themes. A single sentence,\n   or a sentence-per-item restatement of the Accomplished list, FAILS."
+          }
+        }
+      ]
     },
     {
-      "ClaudeCLIJudge": {
-        "rubric": "The response delivers what the case expected. Judge substance only: the right date range, the right shape of data, and content that plausibly came from the tool rather than from memory.",
-        "use_expected_output": true,
-        "evaluation_name": "matches_expectation"
-      }
+      "name": "populated-week-natural-language",
+      "inputs": "What did I work on between August 17 and August 21 2026? Give me a day-by-day summary of my GitHub activity.",
+      "metadata": {
+        "window": "2026-08-17..2026-08-21",
+        "why": "Same shape as the slash-command case but phrased in prose, so the skill has to extract the window itself. A fixed window rather than 'this week' -- a moving window cannot be compared across runs."
+      },
+      "evaluators": [
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "gather_activity.py",
+              "2026-08-17",
+              "2026-08-21"
+            ]
+          }
+        },
+        {
+          "DayCoverage": {
+            "expected_days": [
+              "2026-08-17",
+              "2026-08-18",
+              "2026-08-19",
+              "2026-08-20",
+              "2026-08-21"
+            ]
+          }
+        },
+        {
+          "GroundedIdentifiers": {
+            "expected_identifiers": [
+              69,
+              71,
+              72,
+              73,
+              74,
+              75,
+              77,
+              78,
+              1480,
+              1481,
+              1484,
+              1485,
+              1488,
+              1489,
+              1511,
+              1514,
+              1524,
+              2534
+            ]
+          }
+        },
+        {
+          "ClaudeCLIJudge": {
+            "rubric": "Grade ONLY the top-level `summary:` key at the end of the response -- the TEC weekly\nstatus report, written as HTML. Judge nothing else in the response.\n\nDecide every point from the text in front of you. Do NOT consider whether any repository,\nticket, person or piece of work is real: you cannot check that, it is graded elsewhere, and\na response must never be penalised for being specific.\n\nFAIL if the `summary:` key is missing or does not hold HTML. Otherwise FAIL if any rule\nbelow is violated.\n\nFORM\n1. Carries, in this order: `<b>TEC Weekly Status Report - Dragonfly</b>`, `<b>Project:</b>`,\n   `<b>Date:</b>`, `<b>Status:</b>`, `<b>Summary</b>`, `<b>Accomplished</b>`,\n   `<b>Planned Activities</b>`, `<b>Risks</b>`. An enclosing `<html>` wrapper is fine and\n   must NOT be penalised.\n2. No `<!-- ... -->` template comments survive.\n3. `Date:` reads August 21, 2026, in any unambiguous rendering. This is the last day of the reported\n   window, NOT the day the report was written. Any other date FAILS.\n4. `Status:` is exactly one of the green, yellow or red circle emoji.\n5. No ticket numbers anywhere in the report: no `#123`, no `repo#123`, no `DRA-1234`. Work\n   must be described in plain words, with feat:/fix:/chore: prefixes dropped.\n6. `Risks` either names a concrete risk or reads exactly \"No risks identified at the moment.\"\n7. A Shoutouts block appears only if the request asked for one. This request did not, so any\n   Shoutouts block FAILS.\n\nCONTENT -- the week of 2026-08-17..21\n8. `Accomplished` is a real `<ul>` with `<li>` children -- `<br>`-separated prose, markdown\n   or `*` bullets FAIL -- and covers at least FOUR of these six distinct threads:\n   - portal infrastructure: one capture package in git, portal-daemon tests that find the\n     mock without an operator home dir, build-mock-portal rules/compression\n   - the Pathpoint mock: W0 login-to-dashboard and the W1 BOP flow through bound-ready\n     quotes, plus an aria audit fixing defects across its pages\n   - the Hartford ICON New Customer flow: Basics form through the BOP wizard, carrying\n     ?lob=bop across shared hops\n   - Hartford BOP eval work: fixture named for what W11 serves, the premium card's two\n     states, the step rail\n   - DocuSign: pointing two named operators at their own users\n   - reliability and matching fixes: a timed-out request must say so rather than exit\n     silently, the hooks env wrapper, matching long lead names on their first three words\n   Threads may be merged into one `<li>`.\n9. This window has work still OPEN -- the portal change committing typed values on\n   change+blur, together with the Hartford BOP eval budget, was still in review at the end of\n   the window. `Planned Activities` must therefore be a real `<ul>` with at least one `<li>`\n   naming that continuing work, phrased as an action. An empty Planned Activities, or a\n   statement that no open items remain, FAILS. Describing it WITHOUT its ticket number is\n   required (see rule 5) -- an `<li>` that leads with `agentic-org#1489` or similar FAILS.\n10. `Summary` is 2 to 4 complete sentences synthesising the week's themes. A single sentence,\n   or a sentence-per-item restatement of the Accomplished list, FAILS."
+          }
+        }
+      ]
     },
     {
-      "ClaudeCLIJudge": {
-        "rubric": "The response is grounded in real tool output: it does not invent repositories, ticket numbers, PR titles or dates, and it does not silently substitute a summary where the case expected the tool's own data. Hedging about missing data is fine; fabricated specifics are not.",
-        "evaluation_name": "no_fabrication"
-      }
+      "name": "empty-week",
+      "inputs": "/weekly-activity 2027-08-02..2027-08-06",
+      "metadata": {
+        "window": "2027-08-02..2027-08-06",
+        "why": "Mon-Fri in the future, so the script returns nothing and always will. Tests the two rules a populated week cannot: quiet days still get written out, and an empty payload must not be filled in from memory."
+      },
+      "evaluators": [
+        {
+          "ScriptExecuted": {
+            "required_tool_calls": [
+              "gather_activity.py",
+              "2027-08-02",
+              "2027-08-06"
+            ]
+          }
+        },
+        {
+          "DayCoverage": {
+            "expected_days": [
+              "2027-08-02",
+              "2027-08-03",
+              "2027-08-04",
+              "2027-08-05",
+              "2027-08-06"
+            ]
+          }
+        },
+        {
+          "GroundedIdentifiers": {
+            "expected_identifiers": []
+          }
+        },
+        {
+          "ClaudeCLIJudge": {
+            "rubric": "Grade ONLY the top-level `summary:` key at the end of the response -- the TEC weekly\nstatus report, written as HTML. Judge nothing else in the response.\n\nDecide every point from the text in front of you. Do NOT consider whether any repository,\nticket, person or piece of work is real: you cannot check that, it is graded elsewhere, and\na response must never be penalised for being specific.\n\nFAIL if the `summary:` key is missing or does not hold HTML. Otherwise FAIL if any rule\nbelow is violated.\n\nFORM\n1. Carries, in this order: `<b>TEC Weekly Status Report - Dragonfly</b>`, `<b>Project:</b>`,\n   `<b>Date:</b>`, `<b>Status:</b>`, `<b>Summary</b>`, `<b>Accomplished</b>`,\n   `<b>Planned Activities</b>`, `<b>Risks</b>`. An enclosing `<html>` wrapper is fine and\n   must NOT be penalised.\n2. No `<!-- ... -->` template comments survive.\n3. `Date:` reads August 6, 2027, in any unambiguous rendering. This is the last day of the reported\n   window, NOT the day the report was written. Any other date FAILS.\n4. `Status:` is exactly one of the green, yellow or red circle emoji.\n5. No ticket numbers anywhere in the report: no `#123`, no `repo#123`, no `DRA-1234`. Work\n   must be described in plain words, with feat:/fix:/chore: prefixes dropped.\n6. `Risks` either names a concrete risk or reads exactly \"No risks identified at the moment.\"\n7. A Shoutouts block appears only if the request asked for one. This request did not, so any\n   Shoutouts block FAILS.\n\nCONTENT -- the week of 2027-08-02..06, which is in the future and returns nothing\n8. Every day in the `days` list above has `items: []`. The report must therefore name NO\n   work whatsoever. Naming any accomplishment, repository, project, ticket, carrier, tool or\n   person FAILS -- there is nothing above it that could have been its source. This is the\n   rule this case exists to test; apply it strictly.\n9. `Accomplished` and `Planned Activities` are each either an empty `<ul>`, or a short\n   explicit statement that there is nothing to report. Either form PASSES. Any populated\n   list FAILS.\n10. `Summary` is one or two sentences stating plainly that the window had no recorded\n   activity. Any claim of work done, progress made or momentum FAILS. Because nothing is\n   blocked and nothing is at risk, `Status:` must be the green circle.\n   (Note: the 2-to-4-sentence rule for a populated week does NOT apply here -- one sentence\n   is correct, and must not be penalised.)"
+          }
+        }
+      ]
     }
-  ],
-  "report_evaluators": []
+  ]
 }

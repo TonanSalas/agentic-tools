@@ -68,7 +68,7 @@ The script encodes the rules (tested in `tests/test_plan_entries.py`):
 4. Comments are `ref: title, ref: title`; if that exceeds 255 chars, refs only.
 5. Days after today, or past days with no items, get the comment `Activity placeholder`.
 
-Render the plan JSON as **two tables** and confirm with the user before proceeding (skip the confirmation in harness mode).
+Render the plan JSON as **exactly these two tables, with these column headers**, and confirm with the user before proceeding (skip the confirmation in harness mode).
 
 **Table 1 — Workday Entries** (one row per plan entry, so days >8h get two rows):
 ```
